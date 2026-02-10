@@ -96,6 +96,20 @@ class TestDistanceBased:
         assert est.estimated_ntp == pytest.approx(162, abs=25)
         assert "ATR-72" in est.notes
 
+    def test_wy_ntp_positive_for_business(self, calc):
+        """WY MCT-LHR in D class should earn positive NTP (12.5% of ~3260 miles)."""
+        itin = _make_itinerary(
+            [
+                {"from": "MCT", "to": "LHR", "carrier": "WY"},
+            ]
+        )
+        results = calc.calculate(itin, booking_class="D")
+        assert len(results) == 1
+        est = results[0]
+        assert est.method == NTPMethod.DISTANCE
+        assert est.rate == 12.5
+        assert est.estimated_ntp > 0
+
 
 # ------------------------------------------------------------------
 # Revenue-based NTP tests

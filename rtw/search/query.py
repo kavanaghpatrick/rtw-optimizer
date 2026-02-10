@@ -6,15 +6,9 @@ import difflib
 from datetime import date
 from typing import Optional
 
+from rtw.airports import airports_db as _airports_db
 from rtw.models import CabinClass, TicketType
 from rtw.search.models import SearchQuery
-
-try:
-    import airportsdata
-
-    _airports_db = airportsdata.load("IATA")
-except Exception:
-    _airports_db = {}
 
 
 def _fuzzy_suggestion(code: str) -> str:

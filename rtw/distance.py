@@ -1,13 +1,8 @@
 """Great-circle distance between airports using IATA codes."""
 
-try:
-    import airportsdata
-
-    _airports_db = airportsdata.load("IATA")
-except Exception:
-    _airports_db = {}
-
 from haversine import haversine, Unit
+
+from rtw.airports import airports_db as _airports_db
 
 
 class DistanceCalculator:

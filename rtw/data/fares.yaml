@@ -1,6 +1,11 @@
 # oneworld Explorer base fares by origin city (approximate USD)
 # Based on FlyerTalk data and fare filings as of 2025-2026
 # Note: Fares fluctuate with currency rates and filing changes
+#
+# AONE (first class) fares: estimated at 1.6x DONE multiplier,
+# rounded to nearest $100. Actual filed fares vary by origin currency
+# and are not publicly published per-origin. The 1.6x ratio is derived
+# from ex-UK GBP filings where AONE/DONE ratios range 1.4-1.8x.
 
 origins:
   CAI:
@@ -8,6 +13,10 @@ origins:
     currency: EGP
     notes: "Historically cheapest. EGP devaluation advantage."
     fares:
+      AONE3: 5600
+      AONE4: 6400
+      AONE5: 7000
+      AONE6: 8800
       DONE3: 3500
       DONE4: 4000
       DONE5: 4400
@@ -22,6 +31,10 @@ origins:
     currency: EUR
     notes: "Norway filing advantage. Easy positioning from London."
     fares:
+      AONE3: 7700
+      AONE4: 8600
+      AONE5: 9300
+      AONE6: 10400
       DONE3: 4800
       DONE4: 5400
       DONE5: 5800
@@ -36,6 +49,10 @@ origins:
     currency: ZAR
     notes: "ZAR weakness. Good if Africa is on route."
     fares:
+      AONE3: 6400
+      AONE4: 8000
+      AONE5: 9100
+      AONE6: 10700
       DONE3: 4000
       DONE4: 5000
       DONE5: 5700
@@ -50,6 +67,10 @@ origins:
     currency: JPY
     notes: "Higher taxes/YQ than CAI/OSL."
     fares:
+      AONE3: 8800
+      AONE4: 10200
+      AONE5: 11600
+      AONE6: 13600
       DONE3: 5500
       DONE4: 6360
       DONE5: 7260
@@ -64,6 +85,10 @@ origins:
     currency: LKR
     notes: "SriLankan Airlines is oneworld. Occasionally cheap."
     fares:
+      AONE3: 7200
+      AONE4: 8300
+      AONE5: 9600
+      AONE6: 11200
       DONE3: 4500
       DONE4: 5200
       DONE5: 6000
@@ -78,6 +103,10 @@ origins:
     currency: GBP
     notes: "High UK departure taxes on premium long-haul."
     fares:
+      AONE3: 11200
+      AONE4: 12800
+      AONE5: 14400
+      AONE6: 16800
       DONE3: 7000
       DONE4: 8000
       DONE5: 9000
@@ -92,6 +121,10 @@ origins:
     currency: USD
     notes: "Most expensive origin. Consider positioning to CAI/OSL."
     fares:
+      AONE3: 14400
+      AONE4: 16800
+      AONE5: 19200
+      AONE6: 22600
       DONE3: 9000
       DONE4: 10500
       DONE5: 12000
@@ -106,6 +139,10 @@ origins:
     currency: AUD
     notes: "Ex-Japan is roughly half the price for same itinerary."
     fares:
+      AONE3: 12000
+      AONE4: 14100
+      AONE5: 16000
+      AONE6: 19200
       DONE3: 7500
       DONE4: 8800
       DONE5: 10000

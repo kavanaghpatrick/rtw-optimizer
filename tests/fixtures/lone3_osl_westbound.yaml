@@ -1,0 +1,34 @@
+# LONE3 - Economy Class, 3 continents ex-Oslo (Westbound)
+# Covers: EU/ME, N.America, Asia — budget economy routing
+# Tests: LONE3 fare, economy cabin, westbound direction
+ticket:
+  type: LONE3
+  cabin: economy
+  origin: OSL
+  passengers: 1
+
+segments:
+  - from: OSL
+    to: LHR
+    carrier: BA
+    type: transit
+  - from: LHR
+    to: JFK
+    carrier: BA
+    type: stopover
+  - from: JFK
+    to: LAX
+    carrier: AA
+    type: stopover
+  - from: LAX
+    to: NRT
+    carrier: JL
+    type: stopover
+  - from: NRT
+    to: HEL
+    carrier: AY
+    type: stopover
+  - from: HEL
+    to: OSL
+    carrier: AY
+    type: final

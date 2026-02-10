@@ -100,11 +100,10 @@ def _setup_logging(verbose: bool = False, quiet: bool = False) -> None:
 def _known_airport_codes() -> list[str]:
     """Return a list of known airport codes for fuzzy matching."""
     try:
-        import airportsdata
+        from rtw.airports import airports_db
 
-        db = airportsdata.load("IATA")
-        return list(db.keys())
-    except Exception:
+        return list(airports_db.keys())
+    except SystemExit:
         return []
 
 
@@ -259,6 +258,11 @@ def cost(
     except typer.BadParameter:
         raise
     except Exception as exc:
+        from rtw.cost import FareLookupError
+
+        if isinstance(exc, FareLookupError):
+            _error_panel(str(exc))
+            raise typer.Exit(code=2)
         _error_panel(str(exc))
         raise typer.Exit(code=2)
 
