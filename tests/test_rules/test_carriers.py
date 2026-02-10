@@ -76,6 +76,67 @@ class TestContinentCount:
         assert len(passed_results) >= 0  # May pass or warn depending on continent resolution
 
 
+class TestWYCarrier:
+    """Oman Air (WY) carrier data and eligibility."""
+
+    def test_wy_is_eligible(self):
+        """WY should be eligible for oneworld Explorer."""
+        segs = [
+            {"from": "MCT", "to": "LHR", "carrier": "WY"},
+            {"from": "LHR", "to": "MCT", "carrier": "WY"},
+        ]
+        itin = _make_itinerary(segs, origin="MCT")
+        ctx = build_context(itin)
+        results = EligibleCarrierRule().check(itin, ctx)
+        assert all(r.passed for r in results), "WY should be eligible"
+
+    def test_wy_carrier_data_complete(self):
+        """WY should have all required carrier fields."""
+        import yaml
+        from pathlib import Path
+
+        carriers_path = Path(__file__).parent.parent.parent / "rtw" / "data" / "carriers.yaml"
+        with open(carriers_path) as f:
+            carriers = yaml.safe_load(f)
+        wy = carriers.get("WY", {})
+        assert wy.get("name") == "Oman Air"
+        assert wy.get("alliance") == "oneworld"
+        assert wy.get("eligible") is True
+        assert wy.get("ntp_method") == "distance"
+        assert wy.get("rtw_booking_class") == "D"
+        assert wy.get("yq_tier") is not None
+        assert wy.get("yq_estimate_per_segment") is not None
+
+
+class TestS7Carrier:
+    """S7 Airlines sanctions flag."""
+
+    def test_s7_is_ineligible(self):
+        """S7 should be ineligible (sanctions-suspended)."""
+        segs = [
+            {"from": "OVB", "to": "SVO", "carrier": "S7"},
+            {"from": "SVO", "to": "OVB", "carrier": "S7"},
+        ]
+        itin = _make_itinerary(segs, origin="OVB")
+        ctx = build_context(itin)
+        results = EligibleCarrierRule().check(itin, ctx)
+        assert any(not r.passed for r in results), "S7 should fail eligibility"
+
+    def test_s7_violation_mentions_sanctions(self):
+        """S7 violation message should mention sanctions."""
+        segs = [
+            {"from": "OVB", "to": "SVO", "carrier": "S7"},
+            {"from": "SVO", "to": "OVB", "carrier": "S7"},
+        ]
+        itin = _make_itinerary(segs, origin="OVB")
+        ctx = build_context(itin)
+        results = EligibleCarrierRule().check(itin, ctx)
+        failed = [r for r in results if not r.passed]
+        assert any("sanction" in r.message.lower() for r in failed), (
+            "S7 violation should mention sanctions"
+        )
+
+
 class TestTicketValidity:
     def test_v3_valid_duration(self, v3_itinerary):
         itin = Itinerary(**v3_itinerary)

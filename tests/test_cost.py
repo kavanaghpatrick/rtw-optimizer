@@ -3,7 +3,7 @@
 import pytest
 
 from rtw.models import CostEstimate, Itinerary, TicketType
-from rtw.cost import CostEstimator
+from rtw.cost import CostEstimator, FareLookupError
 
 
 @pytest.fixture
@@ -11,13 +11,13 @@ def estimator():
     return CostEstimator()
 
 
-def _make_itinerary(segments, origin="CAI", ticket_type="DONE4", passengers=1):
+def _make_itinerary(segments, origin="CAI", ticket_type="DONE4", passengers=1, cabin="business"):
     """Build a minimal Itinerary for testing."""
     return Itinerary.model_validate(
         {
             "ticket": {
                 "type": ticket_type,
-                "cabin": "business",
+                "cabin": cabin,
                 "origin": origin,
                 "passengers": passengers,
             },
@@ -348,3 +348,125 @@ class TestTotalEstimate:
         itin = Itinerary.model_validate(v3_itinerary)
         result = estimator.estimate_total(itin, plating_carrier="AA")
         assert "flexibility" in result.notes.lower() or "change" in result.notes.lower()
+
+
+# ------------------------------------------------------------------
+# AONE (first class) fare tests
+# ------------------------------------------------------------------
+
+
+class TestAONEFares:
+    """AONE first class fares from fares.yaml."""
+
+    _ORIGINS = ["CAI", "OSL", "JNB", "NRT", "CMB", "LHR", "JFK", "SYD"]
+    _AONE_TYPES = [TicketType.AONE3, TicketType.AONE4, TicketType.AONE5, TicketType.AONE6]
+
+    def test_aone_fares_nonzero(self, estimator):
+        """AONE4 fare should be > 0 for all 8 origins."""
+        for origin in self._ORIGINS:
+            fare = estimator.get_base_fare(origin, TicketType.AONE4)
+            assert fare > 0, f"AONE4 fare for {origin} is $0"
+
+    def test_aone_fares_all_origins_all_types(self, estimator):
+        """All 32 AONE entries should be > 0."""
+        for origin in self._ORIGINS:
+            for tt in self._AONE_TYPES:
+                fare = estimator.get_base_fare(origin, tt)
+                assert fare > 0, f"{tt.value} fare for {origin} is $0"
+
+    def test_aone_more_than_done(self, estimator):
+        """AONE should be more expensive than DONE for same origin+continent count."""
+        done_types = [TicketType.DONE3, TicketType.DONE4, TicketType.DONE5, TicketType.DONE6]
+        for origin in self._ORIGINS:
+            for aone, done in zip(self._AONE_TYPES, done_types):
+                aone_fare = estimator.get_base_fare(origin, aone)
+                done_fare = estimator.get_base_fare(origin, done)
+                assert aone_fare > done_fare, (
+                    f"{origin}: {aone.value}=${aone_fare} should be > {done.value}=${done_fare}"
+                )
+
+    def test_aone_done_ratio_in_range(self, estimator):
+        """AONE/DONE ratio should be in 1.4-1.8x range."""
+        done_types = [TicketType.DONE3, TicketType.DONE4, TicketType.DONE5, TicketType.DONE6]
+        for origin in self._ORIGINS:
+            for aone, done in zip(self._AONE_TYPES, done_types):
+                aone_fare = estimator.get_base_fare(origin, aone)
+                done_fare = estimator.get_base_fare(origin, done)
+                ratio = aone_fare / done_fare
+                assert 1.4 <= ratio <= 1.8, (
+                    f"{origin}: {aone.value}/{done.value} ratio = {ratio:.2f}, expected 1.4-1.8"
+                )
+
+
+# ------------------------------------------------------------------
+# Zero-fare guard tests
+# ------------------------------------------------------------------
+
+
+class TestZeroFareGuard:
+    """FareLookupError when fare data is missing."""
+
+    def test_zero_fare_raises_fare_lookup_error(self, estimator):
+        """estimate_total() should raise FareLookupError when base_fare == $0."""
+        itin = _make_itinerary(
+            [{"from": "ZZZ", "to": "YYY", "carrier": "QR"}],
+            origin="ZZZ",
+        )
+        with pytest.raises(FareLookupError):
+            estimator.estimate_total(itin)
+
+    def test_fare_lookup_error_message_contains_origin(self, estimator):
+        """FareLookupError message should contain the origin code and ticket type."""
+        itin = _make_itinerary(
+            [{"from": "ZZZ", "to": "YYY", "carrier": "QR"}],
+            origin="ZZZ",
+        )
+        with pytest.raises(FareLookupError, match="ZZZ"):
+            estimator.estimate_total(itin)
+
+
+# ------------------------------------------------------------------
+# Fixture-based tests (DONE3, LONE3)
+# ------------------------------------------------------------------
+
+
+class TestDONE3Fixture:
+    """DONE3 fixture: 3-continent business routing."""
+
+    def test_done3_base_fare_nonzero(self, estimator, done3_itinerary):
+        """DONE3 fixture should have nonzero base fare."""
+        itin = Itinerary.model_validate(done3_itinerary)
+        result = estimator.estimate_total(itin)
+        assert result.base_fare_usd > 0
+
+    def test_done3_per_person_in_range(self, estimator, done3_itinerary):
+        """DONE3 per-person cost should be reasonable ($3,000-$6,000)."""
+        itin = Itinerary.model_validate(done3_itinerary)
+        result = estimator.estimate_total(itin)
+        assert 3_000 <= result.total_per_person_usd <= 6_000
+
+    def test_done3_cheaper_than_done4(self, estimator, done3_itinerary, v3_itinerary):
+        """DONE3 base fare should be less than DONE4."""
+        done3 = Itinerary.model_validate(done3_itinerary)
+        done4 = Itinerary.model_validate(v3_itinerary)
+        # Both are ex-CAI, so compare base fares
+        fare3 = estimator.get_base_fare(done3.ticket.origin, done3.ticket.type)
+        fare4 = estimator.get_base_fare(done4.ticket.origin, done4.ticket.type)
+        assert fare3 < fare4
+
+
+class TestLONE3Fixture:
+    """LONE3 fixture: 3-continent economy routing."""
+
+    def test_lone3_base_fare_nonzero(self, estimator, lone3_itinerary):
+        """LONE3 fixture should have nonzero base fare."""
+        itin = Itinerary.model_validate(lone3_itinerary)
+        result = estimator.estimate_total(itin)
+        assert result.base_fare_usd > 0
+
+    def test_lone3_cheaper_than_done3(self, estimator, lone3_itinerary):
+        """LONE3 should be cheaper than DONE3 for same continent count."""
+        itin = Itinerary.model_validate(lone3_itinerary)
+        lone3_fare = estimator.get_base_fare(itin.ticket.origin, TicketType.LONE3)
+        done3_fare = estimator.get_base_fare(itin.ticket.origin, TicketType.DONE3)
+        assert lone3_fare < done3_fare

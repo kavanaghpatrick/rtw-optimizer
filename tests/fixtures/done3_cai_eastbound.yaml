@@ -1,0 +1,38 @@
+# DONE3 - Business Class, 3 continents ex-Cairo (Eastbound)
+# Covers: EU/ME, Asia, SWP — minimum continent count
+# Tests: DONE3 fare, 3-continent routing, business class
+ticket:
+  type: DONE3
+  cabin: business
+  origin: CAI
+  passengers: 1
+
+segments:
+  - from: CAI
+    to: AMM
+    carrier: RJ
+    type: stopover
+  - from: AMM
+    to: DOH
+    carrier: QR
+    type: transit
+  - from: DOH
+    to: NRT
+    carrier: QR
+    type: stopover
+  - from: NRT
+    to: SYD
+    carrier: JL
+    type: stopover
+  - from: SYD
+    to: SIN
+    carrier: QF
+    type: stopover
+  - from: SIN
+    to: DOH
+    carrier: QR
+    type: transit
+  - from: DOH
+    to: CAI
+    carrier: QR
+    type: final

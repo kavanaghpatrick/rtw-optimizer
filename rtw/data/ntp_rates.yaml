@@ -219,6 +219,23 @@ distance_based:
     S: 2
     V: 2
 
+  WY:
+    D: 12.5
+    J: 12.5
+    C: 12.5
+    I: 6
+    Z: 6
+    Y: 3.5
+    B: 3.5
+    H: 3.5
+    K: 2
+    L: 2
+    M: 2
+    N: 2
+    Q: 2
+    S: 2
+    V: 2
+
 # BA bonus NTP (per segment, BA-marketed flights only)
 # Permanent from 25 Nov 2025
 ba_bonus:

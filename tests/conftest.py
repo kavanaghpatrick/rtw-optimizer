@@ -47,3 +47,15 @@ def too_many_segments_itinerary(load_yaml):
 def minimal_valid_itinerary(load_yaml):
     """Load the minimal valid routing."""
     return load_yaml("minimal_valid.yaml")
+
+
+@pytest.fixture
+def done3_itinerary(load_yaml):
+    """Load the DONE3 business 3-continent routing."""
+    return load_yaml("done3_cai_eastbound.yaml")
+
+
+@pytest.fixture
+def lone3_itinerary(load_yaml):
+    """Load the LONE3 economy 3-continent routing."""
+    return load_yaml("lone3_osl_westbound.yaml")

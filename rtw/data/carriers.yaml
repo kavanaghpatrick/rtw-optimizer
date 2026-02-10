@@ -141,15 +141,25 @@ UL:
   rtw_booking_class: D
   notes: "D class = 25% of distance for NTP."
 
-S7:
-  name: S7 Airlines
+WY:
+  name: Oman Air
   alliance: oneworld
   eligible: true
   ntp_method: distance
   yq_tier: low
+  yq_estimate_per_segment: 90
+  rtw_booking_class: D
+  notes: "Joined oneworld as full member June 2025. Distance-based NTP. D class = 12.5% (lowest in alliance for business)."
+
+S7:
+  name: S7 Airlines
+  alliance: oneworld
+  eligible: false
+  ntp_method: distance
+  yq_tier: low
   yq_estimate_per_segment: 40
   rtw_booking_class: D
-  notes: "Russian carrier. Limited RTW utility due to sanctions."
+  notes: "Russian carrier. Suspended from oneworld Explorer due to EU/US/UK sanctions on Russian aviation. Technically still a oneworld member but flights cannot be ticketed on RTW itineraries."
 
 # Ineligible carriers (for reference)
 LA:

@@ -101,11 +101,11 @@ class TestFareLookup:
         e = CostEstimator()
         assert e.get_base_fare("BOM", TicketType.DONE4) == 0.0
 
-    def test_fare_lookup_unknown_ticket_type(self):
+    def test_fare_lookup_aone4_exists(self):
         e = CostEstimator()
-        # AONE4 doesn't exist in our data
+        # AONE4 now exists in fares.yaml
         result = e.get_base_fare("SYD", TicketType("AONE4"))
-        assert result == 0.0
+        assert result > 0
 
     def test_fare_lookup_case_insensitive(self):
         e = CostEstimator()

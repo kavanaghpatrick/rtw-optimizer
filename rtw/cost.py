@@ -13,54 +13,20 @@ from pathlib import Path
 
 import yaml
 
+from rtw.airports import airports_db
 from rtw.models import CostEstimate, Itinerary, TicketType
 
 _DATA_DIR = Path(__file__).parent / "data"
 
-# Major US airport codes for AA domestic zero-YQ rule
+
+class FareLookupError(Exception):
+    """Raised when a fare lookup returns $0 (missing data)."""
+
+    pass
+
+# US airport codes for AA domestic zero-YQ rule (dynamic from airportsdata)
 _US_AIRPORTS = {
-    "JFK",
-    "EWR",
-    "LGA",
-    "LAX",
-    "SFO",
-    "ORD",
-    "DFW",
-    "MIA",
-    "ATL",
-    "SEA",
-    "BOS",
-    "DEN",
-    "PHX",
-    "MCO",
-    "IAD",
-    "IAH",
-    "CLT",
-    "PHL",
-    "SAN",
-    "AUS",
-    "MSP",
-    "DTW",
-    "SLC",
-    "HNL",
-    "OGG",
-    "TPA",
-    "FLL",
-    "BWI",
-    "DCA",
-    "STL",
-    "PDX",
-    "BNA",
-    "RDU",
-    "CLE",
-    "PIT",
-    "IND",
-    "MCI",
-    "OAK",
-    "SJC",
-    "SMF",
-    "ABQ",
-    "ANC",
+    code for code, info in airports_db.items() if info.get("country") == "US"
 }
 
 
@@ -177,6 +143,11 @@ class CostEstimator:
         passengers = itinerary.ticket.passengers
 
         base_fare = self.get_base_fare(origin, ticket_type)
+        if base_fare == 0.0:
+            raise FareLookupError(
+                f"No fare data for origin={origin} ticket_type={ticket_type.value}. "
+                f"Check rtw/data/fares.yaml."
+            )
         total_yq = self.estimate_surcharges(itinerary, plating_carrier)
         per_person = base_fare + total_yq
         total_all = per_person * passengers

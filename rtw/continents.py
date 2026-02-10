@@ -5,13 +5,7 @@ from typing import Optional
 
 import yaml
 
-try:
-    import airportsdata
-
-    _airports_db = airportsdata.load("IATA")
-except Exception:
-    _airports_db = {}
-
+from rtw.airports import airports_db as _airports_db
 from rtw.models import Continent, TariffConference, CONTINENT_TO_TC
 
 _DATA_DIR = Path(__file__).parent / "data"
