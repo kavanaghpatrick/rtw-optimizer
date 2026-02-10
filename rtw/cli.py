@@ -965,6 +965,20 @@ def _display_verify_result(result: "VerifyResult", quiet: bool = False) -> None:
 
         console.print(table)
 
+        # Connection-only callout
+        conn_only = result.connection_only_segments
+        if conn_only and not quiet:
+            console.print("\n[yellow]Connection-only segments (no nonstop D-class):[/yellow]")
+            for seg in conn_only:
+                display = seg.dclass.display_code if seg.dclass else "?"
+                console.print(
+                    f"  #{seg.index + 1}  {seg.origin}→{seg.destination} on {seg.carrier}: "
+                    f"{display} available via connections only."
+                )
+                console.print(
+                    f"      [dim]Run: rtw check-nonstop {seg.origin} {seg.destination} {seg.carrier}[/dim]"
+                )
+
         # Summary line
         if result.fully_bookable:
             console.print(
