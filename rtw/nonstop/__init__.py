@@ -1,5 +1,6 @@
 """Nonstop route pre-verification for RTW itineraries."""
 
+from rtw.nonstop.checker import NonstopChecker
 from rtw.nonstop.models import (
     NonstopAlternative,
     NonstopBatchResult,
@@ -8,6 +9,7 @@ from rtw.nonstop.models import (
 )
 
 __all__ = [
+    "NonstopChecker",
     "NonstopAlternative",
     "NonstopBatchResult",
     "NonstopResult",
