@@ -9,10 +9,14 @@ import requests
 from rtw.scraper.serpapi_flights import (
     SerpAPIAuthError,
     SerpAPIError,
+    SerpAPIFlight,
+    SerpAPIFlightsResponse,
     SerpAPIQuotaError,
     _extract_carrier_iata_from_serpapi,
+    _parse_all_flights,
     _parse_serpapi_response,
     search_serpapi,
+    search_serpapi_all,
     serpapi_available,
     _CABIN_MAP,
     _STOPS_MAP,
@@ -376,3 +380,282 @@ class TestLiveIntegration:
         if result is not None:
             assert result.source == "serpapi"
             assert result.price_usd > 0
+
+
+# ---------------------------------------------------------------------------
+# Response fixtures for search_serpapi_all / _parse_all_flights
+# ---------------------------------------------------------------------------
+
+RESPONSE_MIXED_STOPS = {
+    "best_flights": [
+        {
+            "flights": [{"airline": "Finnair", "flight_number": "AY 1334"}],
+            "price": 727,
+            "total_duration": 170,
+            "layovers": [],
+        },
+        {
+            "flights": [
+                {"airline": "Finnair", "flight_number": "AY 800"},
+                {"airline": "Finnair", "flight_number": "AY 801"},
+            ],
+            "price": 650,
+            "total_duration": 360,
+            "layovers": [{"name": "Helsinki", "duration": 90}],
+        },
+    ],
+    "other_flights": [
+        {
+            "flights": [{"airline": "British Airways", "flight_number": "BA 798"}],
+            "price": 950,
+            "total_duration": 180,
+            "layovers": [],
+        },
+    ],
+}
+
+RESPONSE_ALL_NONSTOP = {
+    "best_flights": [
+        {
+            "flights": [{"airline": "Japan Airlines", "flight_number": "JL 6"}],
+            "price": 4200,
+            "total_duration": 780,
+            "layovers": [],
+        },
+    ],
+    "other_flights": [
+        {
+            "flights": [{"airline": "Japan Airlines", "flight_number": "JL 8"}],
+            "price": 4500,
+            "total_duration": 790,
+            "layovers": [],
+        },
+    ],
+}
+
+RESPONSE_NO_LEGS = {
+    "best_flights": [{"flights": [], "price": 100, "layovers": []}],
+    "other_flights": [],
+}
+
+
+# ---------------------------------------------------------------------------
+# TestParseAllFlights
+# ---------------------------------------------------------------------------
+
+
+class TestParseAllFlights:
+    def test_mixed_stops_counts(self):
+        result = _parse_all_flights(RESPONSE_MIXED_STOPS)
+        assert result.total_count == 3
+        assert result.nonstop_count == 2  # AY 1334 + BA 798
+
+    def test_mixed_stops_flight_details(self):
+        result = _parse_all_flights(RESPONSE_MIXED_STOPS)
+        nonstops = [f for f in result.flights if f.stops == 0]
+        assert len(nonstops) == 2
+        carriers = {f.carrier for f in nonstops}
+        assert "AY" in carriers
+        assert "BA" in carriers
+
+    def test_all_nonstop(self):
+        result = _parse_all_flights(RESPONSE_ALL_NONSTOP)
+        assert result.total_count == 2
+        assert result.nonstop_count == 2
+
+    def test_flight_fields_populated(self):
+        result = _parse_all_flights(RESPONSE_ALL_NONSTOP)
+        jl6 = result.flights[0]
+        assert jl6.carrier == "JL"
+        assert jl6.airline_name == "Japan Airlines"
+        assert jl6.flight_number == "JL 6"
+        assert jl6.price_usd == 4200.0
+        assert jl6.stops == 0
+        assert jl6.duration_minutes == 780
+
+    def test_empty_response(self):
+        result = _parse_all_flights(RESPONSE_EMPTY)
+        assert result.total_count == 0
+        assert result.nonstop_count == 0
+        assert result.flights == []
+
+    def test_missing_arrays(self):
+        result = _parse_all_flights(RESPONSE_NO_ARRAYS)
+        assert result.total_count == 0
+
+    def test_no_legs_skipped(self):
+        result = _parse_all_flights(RESPONSE_NO_LEGS)
+        assert result.total_count == 0
+
+    def test_stop_count_from_layovers(self):
+        result = _parse_all_flights(RESPONSE_MIXED_STOPS)
+        connecting = [f for f in result.flights if f.stops > 0]
+        assert len(connecting) == 1
+        assert connecting[0].stops == 1
+
+    def test_none_price_preserved(self):
+        result = _parse_all_flights(RESPONSE_NO_PRICES)
+        if result.flights:
+            assert result.flights[0].price_usd is None
+
+
+# ---------------------------------------------------------------------------
+# TestSearchSerpAPIAll
+# ---------------------------------------------------------------------------
+
+
+class TestSearchSerpAPIAll:
+    def test_returns_none_without_key(self, monkeypatch):
+        monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
+        result = search_serpapi_all("LHR", "HEL", TEST_DATE)
+        assert result is None
+
+    @patch("rtw.scraper.serpapi_flights.requests.get")
+    def test_returns_all_flights(self, mock_get, monkeypatch):
+        monkeypatch.setenv("SERPAPI_API_KEY", "test_key")
+        mock_get.return_value = _mock_response(json_data=RESPONSE_MIXED_STOPS)
+        result = search_serpapi_all("LHR", "HEL", TEST_DATE)
+        assert result is not None
+        assert isinstance(result, SerpAPIFlightsResponse)
+        assert result.total_count == 3
+        assert result.nonstop_count == 2
+
+    @patch("rtw.scraper.serpapi_flights.requests.get")
+    def test_request_params_deep_search(self, mock_get, monkeypatch):
+        monkeypatch.setenv("SERPAPI_API_KEY", "test_key")
+        mock_get.return_value = _mock_response(json_data=RESPONSE_EMPTY)
+        search_serpapi_all("LHR", "HEL", TEST_DATE, deep_search=True)
+        params = mock_get.call_args[1]["params"]
+        assert params["deep_search"] == "true"
+
+    @patch("rtw.scraper.serpapi_flights.requests.get")
+    def test_request_params_shallow_search(self, mock_get, monkeypatch):
+        monkeypatch.setenv("SERPAPI_API_KEY", "test_key")
+        mock_get.return_value = _mock_response(json_data=RESPONSE_EMPTY)
+        search_serpapi_all("LHR", "HEL", TEST_DATE, deep_search=False)
+        params = mock_get.call_args[1]["params"]
+        assert params["deep_search"] == "false"
+
+    @patch("rtw.scraper.serpapi_flights.requests.get")
+    def test_include_airlines_param(self, mock_get, monkeypatch):
+        monkeypatch.setenv("SERPAPI_API_KEY", "test_key")
+        mock_get.return_value = _mock_response(json_data=RESPONSE_EMPTY)
+        search_serpapi_all("LHR", "HEL", TEST_DATE, include_airlines="AY")
+        params = mock_get.call_args[1]["params"]
+        assert params["include_airlines"] == "AY"
+
+    @patch("rtw.scraper.serpapi_flights.requests.get")
+    def test_oneworld_alliance_param(self, mock_get, monkeypatch):
+        monkeypatch.setenv("SERPAPI_API_KEY", "test_key")
+        mock_get.return_value = _mock_response(json_data=RESPONSE_EMPTY)
+        search_serpapi_all("LHR", "HEL", TEST_DATE, include_airlines="ONEWORLD")
+        params = mock_get.call_args[1]["params"]
+        assert params["include_airlines"] == "ONEWORLD"
+
+    @patch("rtw.scraper.serpapi_flights.requests.get")
+    def test_no_include_airlines_by_default(self, mock_get, monkeypatch):
+        monkeypatch.setenv("SERPAPI_API_KEY", "test_key")
+        mock_get.return_value = _mock_response(json_data=RESPONSE_EMPTY)
+        search_serpapi_all("LHR", "HEL", TEST_DATE)
+        params = mock_get.call_args[1]["params"]
+        assert "include_airlines" not in params
+
+    @patch("rtw.scraper.serpapi_flights.requests.get")
+    def test_max_stops_nonstop(self, mock_get, monkeypatch):
+        monkeypatch.setenv("SERPAPI_API_KEY", "test_key")
+        mock_get.return_value = _mock_response(json_data=RESPONSE_EMPTY)
+        search_serpapi_all("LHR", "HEL", TEST_DATE, max_stops=0)
+        params = mock_get.call_args[1]["params"]
+        assert params["stops"] == 1  # 0 -> 1 in SerpAPI mapping
+
+    @patch("rtw.scraper.serpapi_flights.requests.get")
+    def test_auth_error_raises(self, mock_get, monkeypatch):
+        monkeypatch.setenv("SERPAPI_API_KEY", "bad_key")
+        mock_get.return_value = _mock_response(status_code=401)
+        with pytest.raises(SerpAPIAuthError):
+            search_serpapi_all("LHR", "HEL", TEST_DATE)
+
+    @patch("rtw.scraper.serpapi_flights.requests.get")
+    def test_quota_error_raises(self, mock_get, monkeypatch):
+        monkeypatch.setenv("SERPAPI_API_KEY", "test_key")
+        mock_get.return_value = _mock_response(status_code=429)
+        with pytest.raises(SerpAPIQuotaError):
+            search_serpapi_all("LHR", "HEL", TEST_DATE)
+
+    @patch("rtw.scraper.serpapi_flights.requests.get", side_effect=requests.Timeout("timeout"))
+    def test_timeout_returns_none(self, mock_get, monkeypatch):
+        monkeypatch.setenv("SERPAPI_API_KEY", "test_key")
+        result = search_serpapi_all("LHR", "HEL", TEST_DATE)
+        assert result is None
+
+    @patch("rtw.scraper.serpapi_flights.requests.get")
+    def test_api_error_in_body_returns_none(self, mock_get, monkeypatch):
+        monkeypatch.setenv("SERPAPI_API_KEY", "test_key")
+        mock_get.return_value = _mock_response(json_data=RESPONSE_API_ERROR)
+        result = search_serpapi_all("LHR", "HEL", TEST_DATE)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# TestSerpAPIFlightDataclass
+# ---------------------------------------------------------------------------
+
+
+class TestSerpAPIFlightDataclass:
+    def test_default_values(self):
+        f = SerpAPIFlight(carrier="AY", airline_name="Finnair")
+        assert f.flight_number is None
+        assert f.price_usd is None
+        assert f.stops == 0
+        assert f.duration_minutes is None
+
+    def test_all_fields(self):
+        f = SerpAPIFlight(
+            carrier="JL",
+            airline_name="Japan Airlines",
+            flight_number="JL 6",
+            price_usd=4200.0,
+            stops=0,
+            duration_minutes=780,
+        )
+        assert f.carrier == "JL"
+        assert f.price_usd == 4200.0
+
+
+class TestSerpAPIFlightsResponse:
+    def test_empty_default(self):
+        r = SerpAPIFlightsResponse()
+        assert r.flights == []
+        assert r.total_count == 0
+        assert r.nonstop_count == 0
+
+    def test_with_flights(self):
+        flights = [
+            SerpAPIFlight(carrier="AY", airline_name="Finnair", stops=0),
+            SerpAPIFlight(carrier="BA", airline_name="British Airways", stops=1),
+        ]
+        r = SerpAPIFlightsResponse(flights=flights, total_count=2, nonstop_count=1)
+        assert r.total_count == 2
+        assert r.nonstop_count == 1
+
+
+# ---------------------------------------------------------------------------
+# TestLiveIntegrationAll (gated)
+# ---------------------------------------------------------------------------
+
+
+class TestLiveIntegrationAll:
+    @pytest.mark.integration
+    @pytest.mark.slow
+    def test_live_search_all_known_nonstop_route(self):
+        if not serpapi_available():
+            pytest.skip("SERPAPI_API_KEY not set")
+        result = search_serpapi_all(
+            "LHR", "HEL", date(2026, 3, 15),
+            cabin="business", max_stops=0, include_airlines="AY",
+        )
+        if result is not None:
+            assert isinstance(result, SerpAPIFlightsResponse)
+            assert result.nonstop_count >= 0
+            for f in result.flights:
+                assert f.stops == 0
