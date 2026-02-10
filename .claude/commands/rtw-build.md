@@ -117,11 +117,13 @@ python3 -m rtw build --route "ROUTE_STRING" --origin ORIGIN --type TICKET_TYPE -
 
 ## Step 5: D-class Availability Check
 
-Run full D-class verification:
+Run D-class availability check on the YAML file:
 
 ```
-python3 -m rtw verify itineraries/FILENAME.yaml
+python3 -m rtw scrape availability itineraries/FILENAME.yaml
 ```
+
+**NOTE**: Use `scrape availability FILE.yaml`, NOT `verify FILE.yaml`. The `verify` command works on search results, not YAML files.
 
 Review results. For any segment WITHOUT nonstop D-class, scan dates to find availability:
 
