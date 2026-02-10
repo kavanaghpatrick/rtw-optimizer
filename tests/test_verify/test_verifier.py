@@ -10,6 +10,7 @@ from rtw.scraper.expertflyer import SessionExpiredError
 from rtw.verify.models import (
     DClassResult,
     DClassStatus,
+    FlightAvailability,
     SegmentVerification,
     VerifyOption,
 )
@@ -28,6 +29,12 @@ def _make_segment(origin, dest, carrier="CX", stype="FLOWN", date=None):
 
 
 def _make_dclass(status, seats, carrier="CX", origin="LHR", dest="HKG"):
+    flights = []
+    if status == DClassStatus.AVAILABLE and seats > 0:
+        flights = [FlightAvailability(
+            carrier=carrier, origin=origin, destination=dest,
+            seats=seats, stops=0,
+        )]
     return DClassResult(
         status=status,
         seats=seats,
@@ -35,6 +42,7 @@ def _make_dclass(status, seats, carrier="CX", origin="LHR", dest="HKG"):
         origin=origin,
         destination=dest,
         target_date=datetime.date(2026, 3, 10),
+        flights=flights,
     )
 
 
