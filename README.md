@@ -46,7 +46,7 @@ uv sync
 
 ```bash
 python3 -m rtw --help          # Show all commands
-uv run pytest -x -q            # Run test suite (796 tests)
+uv run pytest -x -q            # Run test suite (840 tests)
 ```
 
 ### Optional: API Keys
@@ -214,34 +214,41 @@ Key fields:
 
 | Type | Class | Continents | Example fare (Cairo) |
 |------|-------|-----------|---------------------|
+| AONE3 | First | 3 | $5,600 |
+| AONE4 | First | 4 | $6,400 |
+| AONE5 | First | 5 | $7,000 |
+| AONE6 | First | 6 | $8,800 |
 | DONE3 | Business | 3 | $3,500 |
 | DONE4 | Business | 4 | $4,000 |
-| DONE5 | Business | 5 | $4,500 |
-| DONE6 | Business | 6 | $5,000 |
-| LONE3 | Economy | 3 | $2,200 |
-| LONE4 | Economy | 4 | $2,500 |
-| LONE5 | Economy | 5 | $2,800 |
-| LONE6 | Economy | 6 | $3,100 |
+| DONE5 | Business | 5 | $4,400 |
+| DONE6 | Business | 6 | $5,500 |
+| LONE3 | Economy | 3 | $1,800 |
+| LONE4 | Economy | 4 | $2,200 |
+| LONE5 | Economy | 5 | $2,500 |
+| LONE6 | Economy | 6 | $3,000 |
 
 Fares vary significantly by origin city. Use the cost comparison feature to find the cheapest starting point.
 
 ## oneworld Carriers
 
-| Airline | Code | Hub | YQ Level |
-|---------|------|-----|----------|
-| British Airways | BA | LHR | High |
-| Cathay Pacific | CX | HKG | Medium |
-| Qantas | QF | SYD | High |
-| Japan Airlines | JL | NRT/HND | Low |
-| American Airlines | AA | DFW/JFK | Low |
-| Qatar Airways | QR | DOH | Medium |
-| Iberia | IB | MAD | Low |
-| Finnair | AY | HEL | Low |
-| Malaysia Airlines | MH | KUL | Low |
-| Royal Jordanian | RJ | AMM | Low |
-| SriLankan Airlines | UL | CMB | Low |
-| Fiji Airways | FJ | NAN | Low |
-| LATAM (Chile) | LA | SCL | Medium |
+| Airline | Code | Hub | YQ Level | Notes |
+|---------|------|-----|----------|-------|
+| British Airways | BA | LHR | Very High | |
+| Cathay Pacific | CX | HKG | Medium | |
+| Qantas | QF | SYD | Very High | |
+| Japan Airlines | JL | NRT/HND | Very Low | |
+| American Airlines | AA | DFW/JFK | Low | Uses H class (not D) |
+| Qatar Airways | QR | DOH | Medium | Cannot be first carrier |
+| Iberia | IB | MAD | High | |
+| Finnair | AY | HEL | Very Low | |
+| Malaysia Airlines | MH | KUL | Low | |
+| Royal Jordanian | RJ | AMM | Medium | |
+| SriLankan Airlines | UL | CMB | Low | |
+| Fiji Airways | FJ | NAN | Very Low | Joined April 2025 |
+| Alaska Airlines | AS | SEA | Low | |
+| Royal Air Maroc | AT | CMN | Medium | |
+| Oman Air | WY | MCT | Low | Joined June 2025 |
+| S7 Airlines | S7 | OVB | — | Suspended (sanctions) |
 
 Low-YQ carriers (JL, AA, AY, IB) can save hundreds of dollars per segment compared to high-YQ carriers (BA, QF).
 
@@ -303,6 +310,7 @@ rtw/
 │   ├── direction.py    # Direction-of-travel rules
 │   ├── continents.py   # Continent crossing validation
 │   └── ...
+├── airports.py         # Shared airportsdata loader (fail-fast)
 ├── cost.py             # Fare lookup + YQ calculation
 ├── ntp.py              # BA New Tier Points estimator
 ├── value.py            # Per-segment value analysis
@@ -323,8 +331,9 @@ rtw/
 ├── continents.py       # Airport → continent mapping
 ├── distance.py         # Great-circle distance calculator
 ├── data/               # Reference YAML files
-│   ├── carriers.yaml   # oneworld carrier data
-│   ├── fares.yaml      # Base fare tables
+│   ├── carriers.yaml   # oneworld carrier data (16 carriers)
+│   ├── fares.yaml      # Base fare tables (AONE/DONE/LONE x 8 origins)
+│   ├── ntp_rates.yaml  # BA NTP earning rates by carrier + booking class
 │   └── continents.yaml # Airport-continent mappings
 └── output/             # Rich + plain text formatters
 ```

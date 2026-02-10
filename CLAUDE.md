@@ -10,7 +10,7 @@ oneworld Explorer round-the-world ticket optimizer. Validates itineraries agains
 | CLI | Typer + Rich |
 | Models | Pydantic v2 |
 | Package mgr | uv (use `uv run`, `uv sync`) |
-| Tests | pytest (796 tests) |
+| Tests | pytest (840 tests) |
 | Lint | ruff |
 | Scraping | Playwright + httpx |
 
@@ -55,7 +55,8 @@ python3 -m rtw verify                  # Verify D-class availability (needs Expe
 | Models | `rtw/models.py` | Itinerary, Segment, Ticket, CabinClass, TicketType |
 | Validator | `rtw/validator.py` | Rule 3015 orchestrator — builds ValidationContext, runs rules |
 | Rules | `rtw/rules/` | Individual rule files (segments, carriers, direction, continents, etc.) |
-| Cost | `rtw/cost.py` | Fare lookup + YQ surcharge calculation |
+| Airports | `rtw/airports.py` | Shared airportsdata loader (fail-fast, single import) |
+| Cost | `rtw/cost.py` | Fare lookup + YQ surcharge calculation + FareLookupError |
 | NTP | `rtw/ntp.py` | BA New Tier Points estimator |
 | Value | `rtw/value.py` | Per-segment value rating (cost vs distance) |
 | Booking | `rtw/booking.py` | Phone script + GDS command generator |
@@ -73,6 +74,7 @@ python3 -m rtw verify                  # Verify D-class availability (needs Expe
 |------|---------|
 | RTW | Round-the-world ticket (oneworld Explorer) |
 | Rule 3015 | IATA fare rule governing RTW ticket construction |
+| AONE4 / AONE3 | First class, 4 or 3 continents |
 | DONE4 / DONE3 | Business class, 4 or 3 continents |
 | LONE4 / LONE3 | Economy class, 4 or 3 continents |
 | NTP | New Tier Points — BA frequent flyer earning metric |
@@ -106,8 +108,8 @@ python3 -m rtw verify                  # Verify D-class availability (needs Expe
 | `docs/ARCHITECTURE.md` | Full architecture documentation (15KB) |
 | `docs/01-fare-rules.md` | Authoritative IATA Rule 3015 fare rules |
 | `docs/12-rtw-optimization-guide.md` | RTW trip optimization strategies |
-| `rtw/data/carriers.yaml` | oneworld carrier list with alliance status |
-| `rtw/data/fares.yaml` | Base fare table by origin and ticket type |
+| `rtw/data/carriers.yaml` | oneworld carrier list (16 carriers incl. WY, S7 ineligible) |
+| `rtw/data/fares.yaml` | Base fare table: AONE/DONE/LONE x 8 origins |
 | `rtw/data/continents.yaml` | Airport → continent/TC mappings |
 
 ## Slash Commands
