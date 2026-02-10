@@ -296,6 +296,15 @@ This project includes a full [Claude Code](https://claude.ai/claude-code) integr
 
 ### First-Time Setup
 
+On first session, a preflight hook automatically checks your environment:
+- **uv** installed
+- **.venv** exists (runs `uv sync` if missing)
+- **SERPAPI_API_KEY** set (loads from `~/.zshrc` if available)
+- **ExpertFlyer** credentials in macOS keyring
+- **Playwright** chromium browser installed
+
+If anything is missing, the hook reports what's needed. To fix issues interactively:
+
 ```
 /rtw-init
 ```

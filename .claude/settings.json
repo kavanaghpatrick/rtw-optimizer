@@ -19,5 +19,19 @@
       "Bash(git push --force*)",
       "Bash(git reset --hard*)"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/preflight.sh\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
   }
 }

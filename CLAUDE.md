@@ -246,7 +246,7 @@ len(report.results)    # total rules checked
 | `/rtw-help` | Command inventory + domain primer | haiku |
 | `/rtw-build` | Full route-building workflow (search → build → verify) | opus |
 
-**First time?** Run `/rtw-init` to configure SerpAPI + ExpertFlyer credentials and verify the environment.
+**First time?** The `SessionStart` hook auto-checks your environment (uv, .venv, SERPAPI_API_KEY, ExpertFlyer keyring, Playwright). If anything is missing, run `/rtw-init` to set it up.
 
 **Typical workflow**: `/rtw-plan` → `/rtw-search` → `/rtw-verify` (D-class) → `/rtw-analyze` → `/rtw-booking`
 
