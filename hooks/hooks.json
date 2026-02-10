@@ -1,0 +1,10 @@
+{
+  "hooks": [
+    {
+      "event": "SessionStart",
+      "matcher": "startup",
+      "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/preflight.sh\"",
+      "timeout": 30
+    }
+  ]
+}

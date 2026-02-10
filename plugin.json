@@ -1,0 +1,9 @@
+{
+  "name": "rtw-optimizer",
+  "version": "1.0.0",
+  "description": "Round-the-world fare optimizer — route building, nonstop verification, D-class availability, NTP calculation",
+  "author": "patrickkavanagh",
+  "commands": "commands",
+  "hooks": "hooks/hooks.json",
+  "skills": "skills"
+}

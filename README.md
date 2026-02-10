@@ -292,62 +292,76 @@ Low-YQ carriers (JL, AA, AY, IB) can save hundreds of dollars per segment compar
 
 ## Using with Claude Code
 
-This project includes a full [Claude Code](https://claude.ai/claude-code) integration. When you open the project in Claude Code, it automatically loads project context, domain knowledge, and 12 slash commands.
+This project is a [Claude Code](https://claude.ai/claude-code) plugin. It gives Claude 12 slash commands for planning, searching, analyzing, and booking RTW tickets — plus domain knowledge about Rule 3015, D-class availability, NTP earning, and carrier surcharges.
 
-### First-Time Setup
+### Install the Plugin
 
-On first session, a preflight hook automatically checks your environment:
-- **uv** installed
-- **.venv** exists (runs `uv sync` if missing)
-- **SERPAPI_API_KEY** set (loads from `~/.zshrc` if available)
-- **ExpertFlyer** credentials in macOS keyring
-- **Playwright** chromium browser installed
-
-If anything is missing, the hook reports what's needed. To fix issues interactively:
-
-```
-/rtw-init
+```bash
+claude plugin add github:kavanaghpatrick/rtw-optimizer
 ```
 
-This walks you through setting up SerpAPI and ExpertFlyer credentials, installing dependencies, and running a smoke test.
+That's it. The plugin works from any directory — you don't need to clone the repo or cd into anything. On your next Claude Code session, all `/rtw-*` commands will be available.
 
-### Slash Commands
+To verify it installed:
 
-**Trip planning workflow:**
+```
+/rtw-help
+```
+
+### What You Get
+
+**12 slash commands:**
 
 | Command | What It Does |
 |---------|-------------|
 | `/rtw-plan` | Interactive trip planner — picks origin, cities, dates step by step |
 | `/rtw-search` | Search for routes (accepts city codes or reads from saved plan) |
+| `/rtw-build` | Full route-building workflow: nonstop check → build → verify → analyze |
 | `/rtw-analyze` | Full pipeline on an itinerary: validate + cost + NTP + value |
 | `/rtw-booking` | Generate phone booking script with GDS commands |
-| `/rtw-build` | Full route-building workflow: nonstop check → build → verify → analyze |
 | `/rtw-compare` | Compare ticket prices across origin cities |
 | `/rtw-lookup` | Quick airport-to-continent lookup |
-
-**Developer tools:**
-
-| Command | What It Does |
-|---------|-------------|
 | `/rtw-init` | First-time credential and environment setup |
 | `/rtw-verify` | Run tests + lint check |
 | `/rtw-status` | Project status dashboard (branch, tests, credentials, trip state) |
 | `/rtw-setup` | Install dependencies and run smoke test |
 | `/rtw-help` | Show all commands with descriptions and domain primer |
 
-### Typical Workflow
+**Automatic environment checks:** A preflight hook runs on every session start to verify uv, Python venv, API keys, and ExpertFlyer credentials are set up. If something's missing, it tells you what to run.
 
-1. `/rtw-plan` -- Answer questions about origin, cities, dates, ticket type
-2. `/rtw-search` -- Claude runs the search and shows ranked options
-3. `python3 -m rtw verify` -- Check D-class availability on the best options
-4. `/rtw-analyze` -- Full cost/NTP/value analysis
-5. `/rtw-booking` -- Generate the script to call AA and book it
+**Domain knowledge skills:** Claude automatically gets context about route building patterns, D-class availability by carrier, NTP earning rates, and the Python API — so it can help you build and optimize itineraries without you having to explain the domain.
 
-**Route building** (manual, segment-by-segment):
+### First-Time Setup
 
-1. `/rtw-build` -- Interactive workflow: define segments, verify nonstop, build YAML, check D-class
+After installing the plugin, run `/rtw-init` in Claude Code. It walks you through:
+
+1. **SerpAPI key** — enables live Google Flights pricing in search results (`export SERPAPI_API_KEY=your_key` in `~/.zshrc`)
+2. **ExpertFlyer credentials** — enables D-class seat availability checking (stored in macOS keyring)
+3. **Playwright browser** — needed by the ExpertFlyer scraper (`uv run playwright install chromium`)
+
+Without these, the core optimizer (validate, cost, NTP, value, booking) works fully. Search works but without live pricing. D-class verification requires ExpertFlyer.
+
+### Plan a Trip (5-Minute Walkthrough)
+
+```
+/rtw-plan                    Step 1: Answer questions about where you want to go
+/rtw-search                  Step 2: Claude finds and ranks valid routes
+python3 -m rtw verify        Step 3: Check which flights have D-class seats
+/rtw-analyze                 Step 4: See full cost breakdown + NTP earnings
+/rtw-booking                 Step 5: Get a phone script to call AA and book it
+```
+
+Or build a specific route segment-by-segment:
+
+```
+/rtw-build                   Interactive: define segments → verify nonstop → check D-class → analyze
+```
 
 Claude understands the domain vocabulary (Rule 3015, NTP, YQ, D-class, tariff conferences) and can explain trade-offs, suggest alternatives, and help debug validation failures.
+
+### For Developers (Cloned Repo)
+
+If you've cloned the repo, the plugin also works as a project-level integration. Claude Code loads the project `CLAUDE.md` with module maps, conventions, and reference file pointers. The `.claude/settings.json` provides pre-approved bash permissions for common dev commands.
 
 ## Project Structure
 
