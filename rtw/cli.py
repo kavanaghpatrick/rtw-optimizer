@@ -1452,6 +1452,292 @@ def search(
 
 
 # ---------------------------------------------------------------------------
+# Nonstop check command
+# ---------------------------------------------------------------------------
+
+
+def _parse_route_string(route: str) -> list[tuple[str, str, str]]:
+    """Parse route format: 'LHR-HEL:AY,HEL-NRT:AY,NRT-SYD:QF'."""
+    import re
+
+    segments = []
+    for part in route.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        m = re.match(r"([A-Za-z]{3})-([A-Za-z]{3}):([A-Za-z]{2})", part)
+        if not m:
+            raise typer.BadParameter(
+                f"Invalid route segment: '{part}'\n"
+                "  Expected format: LHR-HEL:AY (ORIGIN-DEST:CARRIER)"
+            )
+        segments.append((m.group(1).upper(), m.group(2).upper(), m.group(3).upper()))
+    if not segments:
+        raise typer.BadParameter("Empty route string.")
+    return segments
+
+
+def _parse_pairs_file(path: Path) -> list[tuple[str, str, str]]:
+    """Parse file with 'ORIGIN DEST CARRIER' per line."""
+    if not path.exists():
+        raise typer.BadParameter(f"File not found: {path}")
+    segments = []
+    for line_num, line in enumerate(path.read_text().splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) < 3:
+            raise typer.BadParameter(
+                f"Line {line_num}: expected 'ORIGIN DEST CARRIER', got: {line}"
+            )
+        segments.append((parts[0].upper(), parts[1].upper(), parts[2].upper()))
+    if not segments:
+        raise typer.BadParameter(f"No segments found in {path}")
+    return segments
+
+
+@app.command(name="check-nonstop")
+def check_nonstop(
+    origin: Annotated[Optional[str], typer.Argument(help="Origin airport (3-letter IATA)")] = None,
+    dest: Annotated[Optional[str], typer.Argument(help="Destination airport (3-letter IATA)")] = None,
+    carrier: Annotated[Optional[str], typer.Argument(help="Carrier (2-letter IATA)")] = None,
+    route: Annotated[Optional[str], typer.Option("--route", "-r", help="Batch route: 'LHR-HEL:AY,HEL-DOH:QR'")] = None,
+    file: Annotated[Optional[str], typer.Option("--file", "-f", help="File with 'ORIGIN DEST CARRIER' per line")] = None,
+    date: Annotated[Optional[str], typer.Option("--date", "-d", help="Check date (ISO format, default: 30 days from now)")] = None,
+    json: JsonFlag = False,
+    plain: PlainFlag = False,
+    verbose: VerboseFlag = False,
+    quiet: QuietFlag = False,
+) -> None:
+    """Check nonstop flight service for a route or batch of routes.
+
+    Single:  rtw check-nonstop LHR HEL AY
+    Batch:   rtw check-nonstop --route "LHR-HEL:AY,HEL-DOH:QR"
+    File:    rtw check-nonstop --file pairs.txt
+    """
+    import datetime
+    import json as json_mod
+
+    from rtw.nonstop.checker import NonstopChecker
+    from rtw.scraper.cache import ScrapeCache
+    from rtw.scraper.serpapi_flights import serpapi_available
+
+    _setup_logging(verbose, quiet)
+    fmt = _get_format(json, plain)
+
+    # Check SERPAPI_API_KEY
+    if not serpapi_available():
+        _error_panel(
+            "SERPAPI_API_KEY not set.\n\n"
+            "Get a key at https://serpapi.com/ and set:\n"
+            "  export SERPAPI_API_KEY='your-key-here'"
+        )
+        raise typer.Exit(code=2)
+
+    # Parse date
+    if date:
+        try:
+            check_date = datetime.date.fromisoformat(date)
+        except ValueError:
+            _error_panel(f"Invalid date format: {date}\n  Expected: YYYY-MM-DD")
+            raise typer.Exit(code=2)
+    else:
+        check_date = datetime.date.today() + datetime.timedelta(days=30)
+
+    # Determine mode: route string > file > single
+    if route:
+        segments = _parse_route_string(route)
+    elif file:
+        segments = _parse_pairs_file(Path(file))
+    elif origin and dest and carrier:
+        segments = [(origin.upper(), dest.upper(), carrier.upper())]
+    else:
+        _error_panel(
+            "Provide either:\n"
+            "  rtw check-nonstop LHR HEL AY\n"
+            "  rtw check-nonstop --route 'LHR-HEL:AY,HEL-DOH:QR'\n"
+            "  rtw check-nonstop --file pairs.txt"
+        )
+        raise typer.Exit(code=2)
+
+    # Validate codes
+    for o, d, c in segments:
+        if len(o) != 3:
+            suggestion = _fuzzy_airport_suggestion(o)
+            _error_panel(f"Invalid airport code: {o}{suggestion}")
+            raise typer.Exit(code=2)
+        if len(d) != 3:
+            suggestion = _fuzzy_airport_suggestion(d)
+            _error_panel(f"Invalid airport code: {d}{suggestion}")
+            raise typer.Exit(code=2)
+        if len(c) != 2:
+            _error_panel(f"Invalid carrier code: {c}\n  Expected 2-letter IATA code.")
+            raise typer.Exit(code=2)
+
+    checker = NonstopChecker(cache=ScrapeCache())
+    is_batch = len(segments) > 1
+
+    if is_batch:
+        _run_batch_nonstop(checker, segments, check_date, fmt, verbose, quiet, json_mod)
+    else:
+        _run_single_nonstop(checker, segments[0], check_date, fmt, verbose, quiet, json_mod)
+
+
+def _run_single_nonstop(checker, segment, check_date, fmt, verbose, quiet, json_mod):
+    """Run single nonstop check and display result."""
+    origin, dest, carrier = segment
+    result = checker.check_with_alternatives(origin, dest, carrier, check_date)
+
+    if fmt == "json":
+        typer.echo(json_mod.dumps(result.model_dump(mode="json"), indent=2))
+        raise typer.Exit(code=0 if result.has_nonstop else 1)
+
+    if result.error:
+        _error_panel(f"Check failed: {result.error}")
+        raise typer.Exit(code=2)
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+
+        if result.has_nonstop:
+            console.print(
+                f"\n[bold green]NONSTOP AVAILABLE[/] "
+                f"[cyan]{origin}[/]-[cyan]{dest}[/] on [bold]{carrier}[/] ({result.carrier_name})"
+            )
+            console.print(
+                f"  {result.nonstop_flight_count} nonstop flight{'s' if result.nonstop_flight_count != 1 else ''}"
+                + (f" | ${result.price_range_usd[0]:.0f}-${result.price_range_usd[1]:.0f}" if result.price_range_usd else "")
+            )
+        else:
+            console.print(
+                f"\n[bold red]NO NONSTOP SERVICE[/] "
+                f"[cyan]{origin}[/]-[cyan]{dest}[/] on [bold]{carrier}[/] ({result.carrier_name})"
+            )
+
+        # Alternatives table (only nonstop carriers per UX Q1)
+        nonstop_alts = result.nonstop_alternatives
+        if nonstop_alts:
+            table = Table(title="Oneworld Nonstop Alternatives", show_lines=False)
+            table.add_column("Carrier", style="bold")
+            table.add_column("Nonstops", justify="right")
+            table.add_column("Price Range", justify="right")
+            for alt in nonstop_alts:
+                price_str = (
+                    f"${alt.price_range_usd[0]:.0f}-${alt.price_range_usd[1]:.0f}"
+                    if alt.price_range_usd else "-"
+                )
+                table.add_row(
+                    f"{alt.carrier} {alt.carrier_name}",
+                    str(alt.nonstop_flight_count),
+                    price_str,
+                )
+            console.print(table)
+        elif not result.has_nonstop:
+            console.print("[dim]No oneworld carriers have nonstop service on this route.[/]")
+
+        if verbose and result.from_cache:
+            console.print("[dim]Result from cache[/]")
+
+    except ImportError:
+        # Plain fallback
+        status = "NONSTOP" if result.has_nonstop else "NO NONSTOP"
+        typer.echo(f"{status} {origin}-{dest} {carrier} ({result.carrier_name})")
+
+    raise typer.Exit(code=0 if result.has_nonstop else 1)
+
+
+def _run_batch_nonstop(checker, segments, check_date, fmt, verbose, quiet, json_mod):
+    """Run batch nonstop check and display results."""
+    # Progress callback
+    progress_lines = []
+
+    def progress_cb(current, total, label):
+        if not quiet:
+            typer.echo(f"  [{current}/{total}] {label}", err=True)
+
+    result = checker.check_batch(segments, check_date, progress_cb=progress_cb)
+
+    if fmt == "json":
+        typer.echo(json_mod.dumps(result.model_dump(mode="json"), indent=2))
+        raise typer.Exit(code=0 if result.all_clear else 1)
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+
+        table = Table(title=f"Nonstop Check — {check_date.isoformat()}", show_lines=False)
+        table.add_column("#", justify="right", style="dim")
+        table.add_column("Route", style="cyan")
+        table.add_column("Carrier", style="bold")
+        table.add_column("Status")
+        table.add_column("Flights", justify="right")
+        table.add_column("Alternatives")
+
+        for seg in result.segments:
+            r = seg.result
+            if r is None:
+                table.add_row(str(seg.index + 1), f"{seg.origin}-{seg.destination}", seg.carrier, "[yellow]ERROR[/]", "-", "-")
+                continue
+
+            if r.error:
+                status = "[yellow]ERROR[/]"
+            elif r.has_nonstop:
+                status = "[green]NONSTOP[/]"
+            else:
+                status = "[red]NO NONSTOP[/]"
+
+            alt_str = ", ".join(a.carrier for a in r.nonstop_alternatives) if r.nonstop_alternatives else "-"
+
+            table.add_row(
+                str(seg.index + 1),
+                f"{seg.origin}-{seg.destination}",
+                f"{seg.carrier} {r.carrier_name}",
+                status,
+                str(r.nonstop_flight_count) if not r.error else "-",
+                alt_str,
+            )
+
+        console.print(table)
+
+        # Summary
+        if result.all_clear:
+            console.print(f"\n[bold green]{result.nonstop_count}/{result.total} ALL CLEAR[/] — all segments have nonstop service")
+        else:
+            parts = []
+            if result.nonstop_count:
+                parts.append(f"[green]{result.nonstop_count} nonstop[/]")
+            if result.no_nonstop_count:
+                parts.append(f"[red]{result.no_nonstop_count} no nonstop[/]")
+            if result.error_count:
+                parts.append(f"[yellow]{result.error_count} error[/]")
+            console.print(f"\n{result.total} segments: {', '.join(parts)}")
+
+        if verbose:
+            console.print(f"[dim]API calls used: {result.api_calls_used}[/]")
+
+    except ImportError:
+        # Plain fallback
+        for seg in result.segments:
+            r = seg.result
+            if r and r.has_nonstop:
+                typer.echo(f"NONSTOP {seg.origin}-{seg.destination} {seg.carrier}")
+            elif r and r.error:
+                typer.echo(f"ERROR   {seg.origin}-{seg.destination} {seg.carrier}: {r.error}")
+            else:
+                typer.echo(f"NONE    {seg.origin}-{seg.destination} {seg.carrier}")
+        status_str = "ALL CLEAR" if result.all_clear else "INCOMPLETE"
+        typer.echo(f"\n{status_str}: {result.nonstop_count}/{result.total} nonstop")
+
+    raise typer.Exit(code=0 if result.all_clear else 1)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
