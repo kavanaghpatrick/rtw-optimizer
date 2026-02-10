@@ -70,6 +70,28 @@ class DClassResult(BaseModel):
         return sorted(avail, key=lambda f: (-f.seats, f.depart_time or ""))
 
     @property
+    def nonstop_flights(self) -> list[FlightAvailability]:
+        """Nonstop flights (stops==0) matching the requested O&D with seats > 0."""
+        return [
+            f for f in self.flights
+            if f.stops == 0
+            and f.seats > 0
+            and f.origin == self.origin
+            and f.destination == self.destination
+        ]
+
+    @property
+    def has_nonstop(self) -> bool:
+        """Whether at least one nonstop flight has seats available."""
+        return len(self.nonstop_flights) > 0
+
+    @property
+    def nonstop_seats(self) -> int:
+        """Best seat count on nonstop flights only (0 if no nonstops)."""
+        ns = self.nonstop_flights
+        return max(f.seats for f in ns) if ns else 0
+
+    @property
     def flight_count(self) -> int:
         return len(self.flights)
 
@@ -79,14 +101,18 @@ class DClassResult(BaseModel):
 
     @property
     def display_code(self) -> str:
-        """Short display code: H9 (3 avl), D0, D?, H!"""
+        """Short display code: D9 (3 ns), D9* (conn only), D0, D?, D!"""
         bc = self.booking_class
         if self.status == DClassStatus.ERROR:
             return f"{bc}!"
         if self.status == DClassStatus.UNKNOWN:
             return f"{bc}?"
         if self.flights:
-            return f"{bc}{self.seats} ({self.available_count} avl)"
+            ns = self.nonstop_flights
+            if ns:
+                return f"{bc}{self.nonstop_seats} ({len(ns)} ns)"
+            # Has flights but none are nonstop — flag with *
+            return f"{bc}{self.seats}* ({self.available_count} conn)"
         return f"{bc}{self.seats}"
 
     @property
@@ -130,7 +156,16 @@ class VerifyResult(BaseModel):
 
     @property
     def confirmed(self) -> int:
-        """Count of flown segments with D-class available."""
+        """Count of flown segments with nonstop D-class available."""
+        return sum(
+            1
+            for s in self.flown_segments
+            if s.dclass and s.dclass.has_nonstop
+        )
+
+    @property
+    def confirmed_any(self) -> int:
+        """Count of flown segments with any D-class available (including connections)."""
         return sum(
             1
             for s in self.flown_segments
@@ -152,6 +187,16 @@ class VerifyResult(BaseModel):
         if self.total_flown == 0:
             return True  # Vacuously true
         return self.confirmed == self.total_flown
+
+    @property
+    def connection_only_segments(self) -> list[SegmentVerification]:
+        """Segments with D-class available only via connections (no nonstop)."""
+        return [
+            s for s in self.flown_segments
+            if s.dclass
+            and s.dclass.status == DClassStatus.AVAILABLE
+            and not s.dclass.has_nonstop
+        ]
 
 
 # Type alias for progress callbacks

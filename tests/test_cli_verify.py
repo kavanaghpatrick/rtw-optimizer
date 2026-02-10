@@ -193,10 +193,13 @@ class TestDisplayVerifyResult:
         )
         flights = [
             FlightAvailability(carrier="CX", flight_number="CX252", seats=9,
+                               origin="LHR", destination="HKG",
                                depart_time="03/10/26 11:00 AM", aircraft="77W"),
             FlightAvailability(carrier="CX", flight_number="CX254", seats=6,
+                               origin="LHR", destination="HKG",
                                depart_time="03/10/26 10:05 PM", aircraft="77W"),
             FlightAvailability(carrier="CX", flight_number="CX256", seats=0,
+                               origin="LHR", destination="HKG",
                                depart_time="03/10/26 8:15 PM", aircraft="359"),
         ]
         dclass = DClassResult(
@@ -218,7 +221,7 @@ class TestDisplayVerifyResult:
         captured = capsys.readouterr()
         # Rich output goes to stderr
         assert "D9" in captured.err
-        assert "2 avl" in captured.err
+        assert "2 ns" in captured.err
 
     def test_per_flight_rows_shown(self, capsys):
         from rtw.cli import _display_verify_result

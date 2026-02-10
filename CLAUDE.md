@@ -10,7 +10,7 @@ oneworld Explorer round-the-world ticket optimizer. Validates itineraries agains
 | CLI | Typer + Rich |
 | Models | Pydantic v2 |
 | Package mgr | uv (use `uv run`, `uv sync`) |
-| Tests | pytest (840 tests) |
+| Tests | pytest (940+ tests) |
 | Lint | ruff |
 | Scraping | Playwright + httpx |
 
@@ -46,6 +46,9 @@ python3 -m rtw verify                  # Verify D-class availability (needs Expe
 | `config` | Manage settings (API keys, defaults) |
 | `cache` | Manage scrape result cache |
 | `login` | Manage ExpertFlyer credentials (keyring) |
+| `build` | Generate YAML itinerary from route string |
+| `scan-dates` | Scan date range for D-class availability |
+| `check-nonstop` | Verify nonstop service exists on a city-pair |
 
 ## Module Map
 
@@ -134,10 +137,43 @@ python3 -m rtw verify                  # Verify D-class availability (needs Expe
 | `/rtw-status` | Project status dashboard | haiku |
 | `/rtw-setup` | Install dependencies & run smoke test | sonnet |
 | `/rtw-help` | Command inventory + domain primer | haiku |
+| `/rtw-build` | Full route-building workflow (search → build → verify) | opus |
 
 **First time?** Run `/rtw-init` to configure SerpAPI + ExpertFlyer credentials and verify the environment.
 
 **Typical workflow**: `/rtw-plan` → `/rtw-search` → `/rtw-verify` (D-class) → `/rtw-analyze` → `/rtw-booking`
+
+**Route building**: `/rtw-build` (interactive) or manually: `rtw check-nonstop` → `rtw build` → `rtw validate` → `rtw scan-dates` → `rtw analyze`
+
+## Route Building Knowledge
+
+### Airport Preferences
+- **HND > NRT** for Tokyo: AY flies HND-HEL nonstop, JL flies HND-SYD nonstop; neither from NRT
+- Always verify nonstop service with `rtw check-nonstop` before building — many plausible pairs have no nonstop
+
+### Nonstop Gotchas (NO nonstop despite seeming plausible)
+- NRT-SYD (JL) — JL nonstops are from HND
+- NRT-HEL (AY) — AY nonstops are from HND
+- SYD-LHR (QF) — no nonstop, goes via SIN or PER
+
+### D-class Patterns
+- **QR**: Generous — D9 common on DOH routes (DOH-LAX, DOH-LHR, etc.)
+- **JL**: Good availability, especially HND-SYD
+- **AY**: Tight on long-haul nonstops — HEL-LAX AY1 showed 0/12 dates nonstop D-class
+- **BA**: D9 common on LHR-LAX (5+ daily flights)
+
+### NTP Earning Rates (for route optimization)
+- **Tier 1 (50% distance)**: JL, QR, AY, FJ, RJ, S7, WY
+- **Tier 2 (25% distance)**: CX, QF, MH, SL
+- **Revenue-based (~0 on D-class)**: BA, AA, IB, AS
+
+### Proven LAX Westbound Routes
+- **V1 Direct** (4 seg): LAX→HND:JL → SYD:JL → DOH:QR → LAX:QR — 13,158 NTP, all D-class confirmed
+- **V2 London** (5 seg): LAX→HND:JL → SYD:JL → DOH:QR → LHR:QR → LAX:BA — 11,684 NTP, all D-class confirmed
+
+### AY1 HEL-LAX Schedule
+- Operates Mon/Wed/Thu ONLY
+- D-class extremely scarce on nonstop (0 across all dates checked Apr 2026)
 
 ## Notes
 

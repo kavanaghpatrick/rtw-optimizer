@@ -162,6 +162,12 @@ class TestVerifyResult:
         for i, (stype, status, seats) in enumerate(statuses):
             dclass = None
             if status is not None:
+                flights = []
+                if status == DClassStatus.AVAILABLE and seats > 0:
+                    flights = [FlightAvailability(
+                        carrier="CX", origin="LHR", destination="HKG",
+                        seats=seats, stops=0,
+                    )]
                 dclass = DClassResult(
                     status=status,
                     seats=seats,
@@ -169,6 +175,7 @@ class TestVerifyResult:
                     origin="LHR",
                     destination="HKG",
                     target_date=datetime.date(2026, 3, 10),
+                    flights=flights,
                 )
             segments.append(
                 SegmentVerification(
@@ -279,12 +286,16 @@ class TestDClassResultWithFlights:
     def _make_flights(self):
         return [
             FlightAvailability(carrier="CX", flight_number="CX252", seats=9,
+                               origin="LHR", destination="HKG",
                                depart_time="03/10/26 11:00 AM"),
             FlightAvailability(carrier="CX", flight_number="CX254", seats=6,
+                               origin="LHR", destination="HKG",
                                depart_time="03/10/26 10:05 PM"),
             FlightAvailability(carrier="CX", flight_number="CX256", seats=0,
+                               origin="LHR", destination="HKG",
                                depart_time="03/10/26 8:15 PM"),
             FlightAvailability(carrier="BA", flight_number="BA708", seats=9,
+                               origin="LHR", destination="HKG",
                                depart_time="03/10/26 6:30 AM"),
         ]
 
@@ -330,7 +341,7 @@ class TestDClassResultWithFlights:
             target_date=datetime.date(2026, 3, 10),
             flights=self._make_flights(),
         )
-        assert r.display_code == "D9 (3 avl)"
+        assert r.display_code == "D9 (3 ns)"
 
     def test_display_code_no_flights(self):
         r = DClassResult(
@@ -342,8 +353,10 @@ class TestDClassResultWithFlights:
 
     def test_display_code_all_d0(self):
         flights = [
-            FlightAvailability(carrier="CX", flight_number="CX252", seats=0),
-            FlightAvailability(carrier="CX", flight_number="CX254", seats=0),
+            FlightAvailability(carrier="CX", flight_number="CX252", seats=0,
+                               origin="LHR", destination="HKG"),
+            FlightAvailability(carrier="CX", flight_number="CX254", seats=0,
+                               origin="LHR", destination="HKG"),
         ]
         r = DClassResult(
             status=DClassStatus.NOT_AVAILABLE, seats=0, carrier="CX",
@@ -351,7 +364,7 @@ class TestDClassResultWithFlights:
             target_date=datetime.date(2026, 3, 10),
             flights=flights,
         )
-        assert r.display_code == "D0 (0 avl)"
+        assert r.display_code == "D0* (0 conn)"
 
     def test_serialization_with_flights(self):
         r = DClassResult(
@@ -409,8 +422,10 @@ class TestBookingClassDisplay:
 
     def test_h_class_with_flights(self):
         flights = [
-            FlightAvailability(carrier="AA", flight_number="AA100", seats=9, booking_class="H"),
-            FlightAvailability(carrier="AA", flight_number="AA106", seats=0, booking_class="H"),
+            FlightAvailability(carrier="AA", flight_number="AA100", seats=9,
+                               origin="JFK", destination="LHR", booking_class="H"),
+            FlightAvailability(carrier="AA", flight_number="AA106", seats=0,
+                               origin="JFK", destination="LHR", booking_class="H"),
         ]
         r = DClassResult(
             status=DClassStatus.AVAILABLE, seats=9, carrier="AA",
@@ -419,7 +434,7 @@ class TestBookingClassDisplay:
             booking_class="H",
             flights=flights,
         )
-        assert r.display_code == "H9 (1 avl)"
+        assert r.display_code == "H9 (1 ns)"
 
     def test_default_booking_class_is_d(self):
         r = DClassResult(

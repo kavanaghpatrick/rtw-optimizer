@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass, field
 from datetime import date as Date
 from typing import Optional
 
@@ -216,3 +217,156 @@ def _extract_carrier_iata_from_serpapi(airline_name: str) -> str:
         if name in text:
             return code
     return airline_name[:2].upper() if len(airline_name) >= 2 else "??"
+
+
+# ---------------------------------------------------------------------------
+# All-flights API (for nonstop checking)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SerpAPIFlight:
+    """A single flight option from a SerpAPI response."""
+
+    carrier: str
+    airline_name: str
+    flight_number: Optional[str] = None
+    price_usd: Optional[float] = None
+    stops: int = 0
+    duration_minutes: Optional[int] = None
+
+
+@dataclass
+class SerpAPIFlightsResponse:
+    """All flights from a SerpAPI search."""
+
+    flights: list[SerpAPIFlight] = field(default_factory=list)
+    total_count: int = 0
+    nonstop_count: int = 0
+
+
+def search_serpapi_all(
+    origin: str,
+    dest: str,
+    date: Date,
+    cabin: str = "business",
+    max_stops: Optional[int] = None,
+    include_airlines: Optional[str] = None,
+    deep_search: bool = True,
+) -> Optional[SerpAPIFlightsResponse]:
+    """Search SerpAPI and return all flights (not just cheapest).
+
+    Unlike search_serpapi(), this returns structured data about every flight
+    option, enabling nonstop counting, price range extraction, and carrier
+    identification.
+
+    Args:
+        origin: 3-letter IATA airport code.
+        dest: 3-letter IATA airport code.
+        date: Flight date.
+        cabin: Cabin class.
+        max_stops: Max stops filter (0=nonstop, 1=1-stop-or-fewer, 2=2-stops-or-fewer).
+        include_airlines: Carrier filter (e.g., "AY", "ONEWORLD").
+        deep_search: Whether to use SerpAPI deep search (slower but more thorough).
+
+    Returns:
+        SerpAPIFlightsResponse with all flights, or None on error.
+    """
+    api_key = os.environ.get("SERPAPI_API_KEY", "").strip()
+    if not api_key:
+        logger.debug("SERPAPI_API_KEY not set, skipping SerpAPI search")
+        return None
+
+    _rate_limit()
+
+    params: dict = {
+        "engine": _SERPAPI_ENGINE,
+        "api_key": api_key,
+        "departure_id": origin.upper(),
+        "arrival_id": dest.upper(),
+        "outbound_date": date.isoformat(),
+        "type": 2,  # one-way
+        "travel_class": _CABIN_MAP.get(cabin.lower(), 3),
+        "currency": "USD",
+        "hl": "en",
+        "deep_search": "true" if deep_search else "false",
+    }
+
+    if include_airlines:
+        params["include_airlines"] = include_airlines
+
+    if max_stops is not None and max_stops in _STOPS_MAP:
+        params["stops"] = _STOPS_MAP[max_stops]
+
+    try:
+        resp = requests.get(_SERPAPI_BASE_URL, params=params, timeout=_SERPAPI_TIMEOUT_S)
+    except requests.Timeout:
+        logger.warning("SerpAPI timeout for %s-%s", origin, dest)
+        return None
+    except requests.RequestException as exc:
+        logger.warning("SerpAPI network error for %s-%s: %s", origin, dest, exc)
+        return None
+
+    if resp.status_code == 401:
+        raise SerpAPIAuthError("Invalid or missing SERPAPI_API_KEY")
+    if resp.status_code == 429:
+        raise SerpAPIQuotaError("Monthly SerpAPI search quota exceeded")
+    if resp.status_code >= 400:
+        logger.warning("SerpAPI HTTP %d for %s-%s", resp.status_code, origin, dest)
+        return None
+
+    try:
+        data = resp.json()
+    except ValueError:
+        logger.warning("SerpAPI returned non-JSON for %s-%s", origin, dest)
+        return None
+
+    if data.get("error"):
+        logger.warning("SerpAPI error for %s-%s: %s", origin, dest, data["error"])
+        return None
+
+    return _parse_all_flights(data)
+
+
+def _parse_all_flights(data: dict) -> SerpAPIFlightsResponse:
+    """Parse all flight options from SerpAPI response."""
+    best = data.get("best_flights", [])
+    other = data.get("other_flights", [])
+    all_options = best + other
+
+    flights: list[SerpAPIFlight] = []
+    nonstop_count = 0
+
+    for option in all_options:
+        legs = option.get("flights", [])
+        if not legs:
+            continue
+
+        first_leg = legs[0]
+        airline_name = first_leg.get("airline", "")
+        carrier_code = _extract_carrier_iata_from_serpapi(airline_name)
+        flight_number = first_leg.get("flight_number", "")
+
+        layovers = option.get("layovers", [])
+        stops = len(layovers)
+        price = option.get("price")
+        duration = option.get("total_duration")
+
+        flight = SerpAPIFlight(
+            carrier=carrier_code,
+            airline_name=airline_name,
+            flight_number=flight_number or None,
+            price_usd=float(price) if price is not None else None,
+            stops=stops,
+            duration_minutes=duration,
+        )
+        flights.append(flight)
+
+        if stops == 0:
+            nonstop_count += 1
+
+    return SerpAPIFlightsResponse(
+        flights=flights,
+        total_count=len(flights),
+        nonstop_count=nonstop_count,
+    )

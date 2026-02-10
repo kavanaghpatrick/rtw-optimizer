@@ -19,7 +19,7 @@ from rtw.search.models import (
     SearchQuery,
     SearchResult,
 )
-from rtw.verify.models import DClassResult, DClassStatus, SegmentVerification, VerifyOption
+from rtw.verify.models import DClassResult, DClassStatus, FlightAvailability, SegmentVerification, VerifyOption
 from rtw.verify.state import SearchState
 from rtw.verify.verifier import DClassVerifier
 
@@ -94,6 +94,10 @@ class TestFullPipeline:
                 origin=seg.origin,
                 destination=seg.destination,
                 target_date=seg.target_date or datetime.date(2026, 9, 1),
+                flights=[FlightAvailability(
+                    carrier=seg.carrier, origin=seg.origin,
+                    destination=seg.destination, seats=9, stops=0,
+                )],
             )
 
         scraper = MagicMock()
@@ -159,6 +163,9 @@ class TestFullPipeline:
                 status=DClassStatus.AVAILABLE, seats=9, carrier="CX",
                 origin="SYD", destination="HKG",
                 target_date=datetime.date(2026, 9, 1),
+                flights=[FlightAvailability(
+                    carrier="CX", origin="SYD", destination="HKG", seats=9, stops=0,
+                )],
             ),
             DClassResult(
                 status=DClassStatus.NOT_AVAILABLE, seats=0, carrier="BA",
@@ -169,6 +176,9 @@ class TestFullPipeline:
                 status=DClassStatus.AVAILABLE, seats=5, carrier="QF",
                 origin="LHR", destination="SYD",
                 target_date=datetime.date(2026, 9, 1),
+                flights=[FlightAvailability(
+                    carrier="QF", origin="LHR", destination="SYD", seats=5, stops=0,
+                )],
             ),
         ]
         cache = MagicMock()
@@ -199,6 +209,9 @@ class TestFullPipeline:
                 status=DClassStatus.AVAILABLE, seats=9, carrier="CX",
                 origin="SYD", destination="HKG",
                 target_date=datetime.date(2026, 9, 1),
+                flights=[FlightAvailability(
+                    carrier="CX", origin="SYD", destination="HKG", seats=9, stops=0,
+                )],
             ),
             SessionExpiredError("session expired"),
         ]

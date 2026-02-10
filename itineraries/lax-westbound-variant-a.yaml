@@ -1,0 +1,48 @@
+ticket:
+  type: DONE4
+  cabin: business
+  origin: LAX
+  passengers: 1
+  departure: "2026-04-01"
+  plating_carrier: AA
+
+segments:
+  - from: LAX
+    to: HND
+    carrier: JL
+    flight: JL15
+    date: "2026-04-01"
+    type: stopover
+    notes: "Japan Airlines 787 — LAX to Haneda nonstop 11h45m"
+
+  - from: HND
+    to: SYD
+    carrier: JL
+    flight: JL51
+    date: "2026-04-05"
+    type: stopover
+    notes: "Japan Airlines 787 — Haneda to Sydney nonstop 9h40m"
+
+  - from: SYD
+    to: DOH
+    carrier: QR
+    flight: QR909
+    date: "2026-04-09"
+    type: stopover
+    notes: "Qatar Airways 777 — Sydney to Doha nonstop 14h50m"
+
+  - from: DOH
+    to: HEL
+    carrier: QR
+    flight: AY1982
+    date: "2026-04-13"
+    type: stopover
+    notes: "Finnair A350 operated for QR — Doha to Helsinki nonstop 7h05m"
+
+  - from: HEL
+    to: LAX
+    carrier: AY
+    flight: AY1
+    date: "2026-04-16"
+    type: final
+    notes: "Finnair A350 — Helsinki to LAX nonstop 11h05m. Flies Mon/Wed/Thu only."

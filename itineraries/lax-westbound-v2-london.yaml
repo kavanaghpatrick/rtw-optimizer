@@ -1,0 +1,47 @@
+ticket:
+  type: DONE4
+  cabin: business
+  origin: LAX
+  passengers: 1
+  departure: "2026-04-01"
+  plating_carrier: AA
+
+segments:
+  - from: LAX
+    to: HND
+    carrier: JL
+    flight: JL15
+    date: "2026-04-01"
+    type: stopover
+    notes: "Japan Airlines 787 nonstop 11h45m — D9 confirmed"
+
+  - from: HND
+    to: SYD
+    carrier: JL
+    flight: JL51
+    date: "2026-04-05"
+    type: stopover
+    notes: "Japan Airlines 787 nonstop 9h40m — D3 confirmed"
+
+  - from: SYD
+    to: DOH
+    carrier: QR
+    flight: QR909
+    date: "2026-04-09"
+    type: stopover
+    notes: "Qatar Airways 777 nonstop 14h50m — D9 confirmed"
+
+  - from: DOH
+    to: LHR
+    carrier: QR
+    date: "2026-04-13"
+    type: stopover
+    notes: "Qatar Airways QSuite nonstop 7h — D9 confirmed. 10 daily nonstops."
+
+  - from: LHR
+    to: LAX
+    carrier: BA
+    flight: BA283
+    date: "2026-04-16"
+    type: final
+    notes: "British Airways Club Suite nonstop 11h — D9 confirmed"

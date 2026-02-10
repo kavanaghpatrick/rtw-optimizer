@@ -965,6 +965,20 @@ def _display_verify_result(result: "VerifyResult", quiet: bool = False) -> None:
 
         console.print(table)
 
+        # Connection-only callout
+        conn_only = result.connection_only_segments
+        if conn_only and not quiet:
+            console.print("\n[yellow]Connection-only segments (no nonstop D-class):[/yellow]")
+            for seg in conn_only:
+                display = seg.dclass.display_code if seg.dclass else "?"
+                console.print(
+                    f"  #{seg.index + 1}  {seg.origin}→{seg.destination} on {seg.carrier}: "
+                    f"{display} available via connections only."
+                )
+                console.print(
+                    f"      [dim]Run: rtw check-nonstop {seg.origin} {seg.destination} {seg.carrier}[/dim]"
+                )
+
         # Summary line
         if result.fully_bookable:
             console.print(
@@ -1301,11 +1315,47 @@ def search(
             rank_by=rank_by,
         )
 
-        # Phase 2: Generate candidates
-        candidates = generate_candidates(query)
+        # Phase 2: Generate candidates (with optional nonstop pre-filter)
+        ns_filter = None
+        if nonstop:
+            from rtw.nonstop.checker import NonstopChecker
+            from rtw.scraper.serpapi_flights import serpapi_available
+
+            if serpapi_available():
+                ns_checker = NonstopChecker(cache=ScrapeCache())
+                ns_date = df  # Use search start date for nonstop check
+                ns_cache: dict[tuple[str, str, str], bool] = {}
+
+                def _nonstop_filter(o: str, d: str, c: str) -> bool:
+                    key = (o.upper(), d.upper(), c.upper())
+                    if key not in ns_cache:
+                        result = ns_checker.check(o, d, c, ns_date)
+                        ns_cache[key] = result.has_nonstop
+                    return ns_cache[key]
+
+                ns_filter = _nonstop_filter
+                if not quiet:
+                    typer.echo("Nonstop pre-filter active (--nonstop).", err=True)
+            else:
+                if not quiet:
+                    typer.echo(
+                        "Warning: --nonstop used but SERPAPI_API_KEY not set. "
+                        "Skipping nonstop pre-filter.",
+                        err=True,
+                    )
+
+        candidates = generate_candidates(query, nonstop_filter=ns_filter)
         if not candidates:
             if not quiet:
-                _error_panel("No valid itinerary options found. Try different cities or ticket type.")
+                msg = "No valid itinerary options found."
+                if nonstop and ns_filter:
+                    msg += (
+                        "\n\nThe --nonstop filter may have eliminated all candidates.\n"
+                        "Try without --nonstop, or run `rtw check-nonstop` to verify routes."
+                    )
+                else:
+                    msg += " Try different cities or ticket type."
+                _error_panel(msg)
             raise typer.Exit(code=1)
 
         # Phase 3: Score and rank (initial)
@@ -1449,6 +1499,640 @@ def search(
             raise typer.Exit(code=2)
         _error_panel(str(exc))
         raise typer.Exit(code=2)
+
+
+# ---------------------------------------------------------------------------
+# Nonstop check command
+# ---------------------------------------------------------------------------
+
+
+def _parse_route_string(route: str) -> list[tuple[str, str, str]]:
+    """Parse route format: 'LHR-HEL:AY,HEL-NRT:AY,NRT-SYD:QF'."""
+    import re
+
+    segments = []
+    for part in route.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        m = re.match(r"([A-Za-z]{3})-([A-Za-z]{3}):([A-Za-z]{2})", part)
+        if not m:
+            raise typer.BadParameter(
+                f"Invalid route segment: '{part}'\n"
+                "  Expected format: LHR-HEL:AY (ORIGIN-DEST:CARRIER)"
+            )
+        segments.append((m.group(1).upper(), m.group(2).upper(), m.group(3).upper()))
+    if not segments:
+        raise typer.BadParameter("Empty route string.")
+    return segments
+
+
+def _parse_pairs_file(path: Path) -> list[tuple[str, str, str]]:
+    """Parse file with 'ORIGIN DEST CARRIER' per line."""
+    if not path.exists():
+        raise typer.BadParameter(f"File not found: {path}")
+    segments = []
+    for line_num, line in enumerate(path.read_text().splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) < 3:
+            raise typer.BadParameter(
+                f"Line {line_num}: expected 'ORIGIN DEST CARRIER', got: {line}"
+            )
+        segments.append((parts[0].upper(), parts[1].upper(), parts[2].upper()))
+    if not segments:
+        raise typer.BadParameter(f"No segments found in {path}")
+    return segments
+
+
+@app.command(name="check-nonstop")
+def check_nonstop(
+    origin: Annotated[Optional[str], typer.Argument(help="Origin airport (3-letter IATA)")] = None,
+    dest: Annotated[Optional[str], typer.Argument(help="Destination airport (3-letter IATA)")] = None,
+    carrier: Annotated[Optional[str], typer.Argument(help="Carrier (2-letter IATA)")] = None,
+    route: Annotated[Optional[str], typer.Option("--route", "-r", help="Batch route: 'LHR-HEL:AY,HEL-DOH:QR'")] = None,
+    file: Annotated[Optional[str], typer.Option("--file", "-f", help="File with 'ORIGIN DEST CARRIER' per line")] = None,
+    date: Annotated[Optional[str], typer.Option("--date", "-d", help="Check date (ISO format, default: 30 days from now)")] = None,
+    json: JsonFlag = False,
+    plain: PlainFlag = False,
+    verbose: VerboseFlag = False,
+    quiet: QuietFlag = False,
+) -> None:
+    """Check nonstop flight service for a route or batch of routes.
+
+    Single:  rtw check-nonstop LHR HEL AY
+    Batch:   rtw check-nonstop --route "LHR-HEL:AY,HEL-DOH:QR"
+    File:    rtw check-nonstop --file pairs.txt
+    """
+    import datetime
+    import json as json_mod
+
+    from rtw.nonstop.checker import NonstopChecker
+    from rtw.scraper.cache import ScrapeCache
+    from rtw.scraper.serpapi_flights import serpapi_available
+
+    _setup_logging(verbose, quiet)
+    fmt = _get_format(json, plain)
+
+    # Check SERPAPI_API_KEY
+    if not serpapi_available():
+        _error_panel(
+            "SERPAPI_API_KEY not set.\n\n"
+            "Get a key at https://serpapi.com/ and set:\n"
+            "  export SERPAPI_API_KEY='your-key-here'"
+        )
+        raise typer.Exit(code=2)
+
+    # Parse date
+    if date:
+        try:
+            check_date = datetime.date.fromisoformat(date)
+        except ValueError:
+            _error_panel(f"Invalid date format: {date}\n  Expected: YYYY-MM-DD")
+            raise typer.Exit(code=2)
+    else:
+        check_date = datetime.date.today() + datetime.timedelta(days=30)
+
+    # Determine mode: route string > file > single
+    if route:
+        segments = _parse_route_string(route)
+    elif file:
+        segments = _parse_pairs_file(Path(file))
+    elif origin and dest and carrier:
+        segments = [(origin.upper(), dest.upper(), carrier.upper())]
+    else:
+        _error_panel(
+            "Provide either:\n"
+            "  rtw check-nonstop LHR HEL AY\n"
+            "  rtw check-nonstop --route 'LHR-HEL:AY,HEL-DOH:QR'\n"
+            "  rtw check-nonstop --file pairs.txt"
+        )
+        raise typer.Exit(code=2)
+
+    # Validate codes
+    for o, d, c in segments:
+        if len(o) != 3:
+            suggestion = _fuzzy_airport_suggestion(o)
+            _error_panel(f"Invalid airport code: {o}{suggestion}")
+            raise typer.Exit(code=2)
+        if len(d) != 3:
+            suggestion = _fuzzy_airport_suggestion(d)
+            _error_panel(f"Invalid airport code: {d}{suggestion}")
+            raise typer.Exit(code=2)
+        if len(c) != 2:
+            _error_panel(f"Invalid carrier code: {c}\n  Expected 2-letter IATA code.")
+            raise typer.Exit(code=2)
+
+    checker = NonstopChecker(cache=ScrapeCache())
+    is_batch = len(segments) > 1
+
+    if is_batch:
+        _run_batch_nonstop(checker, segments, check_date, fmt, verbose, quiet, json_mod)
+    else:
+        _run_single_nonstop(checker, segments[0], check_date, fmt, verbose, quiet, json_mod)
+
+
+def _run_single_nonstop(checker, segment, check_date, fmt, verbose, quiet, json_mod):
+    """Run single nonstop check and display result."""
+    origin, dest, carrier = segment
+    result = checker.check_with_alternatives(origin, dest, carrier, check_date)
+
+    if fmt == "json":
+        typer.echo(json_mod.dumps(result.model_dump(mode="json"), indent=2))
+        raise typer.Exit(code=0 if result.has_nonstop else 1)
+
+    if result.error:
+        _error_panel(f"Check failed: {result.error}")
+        raise typer.Exit(code=2)
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+
+        if result.has_nonstop:
+            console.print(
+                f"\n[bold green]NONSTOP AVAILABLE[/] "
+                f"[cyan]{origin}[/]-[cyan]{dest}[/] on [bold]{carrier}[/] ({result.carrier_name})"
+            )
+            console.print(
+                f"  {result.nonstop_flight_count} nonstop flight{'s' if result.nonstop_flight_count != 1 else ''}"
+                + (f" | ${result.price_range_usd[0]:.0f}-${result.price_range_usd[1]:.0f}" if result.price_range_usd else "")
+            )
+        else:
+            console.print(
+                f"\n[bold red]NO NONSTOP SERVICE[/] "
+                f"[cyan]{origin}[/]-[cyan]{dest}[/] on [bold]{carrier}[/] ({result.carrier_name})"
+            )
+
+        # Alternatives table (only nonstop carriers per UX Q1)
+        nonstop_alts = result.nonstop_alternatives
+        if nonstop_alts:
+            table = Table(title="Oneworld Nonstop Alternatives", show_lines=False)
+            table.add_column("Carrier", style="bold")
+            table.add_column("Nonstops", justify="right")
+            table.add_column("Price Range", justify="right")
+            for alt in nonstop_alts:
+                price_str = (
+                    f"${alt.price_range_usd[0]:.0f}-${alt.price_range_usd[1]:.0f}"
+                    if alt.price_range_usd else "-"
+                )
+                table.add_row(
+                    f"{alt.carrier} {alt.carrier_name}",
+                    str(alt.nonstop_flight_count),
+                    price_str,
+                )
+            console.print(table)
+        elif not result.has_nonstop:
+            console.print("[dim]No oneworld carriers have nonstop service on this route.[/]")
+
+        if verbose and result.from_cache:
+            console.print("[dim]Result from cache[/]")
+
+    except ImportError:
+        # Plain fallback
+        status = "NONSTOP" if result.has_nonstop else "NO NONSTOP"
+        typer.echo(f"{status} {origin}-{dest} {carrier} ({result.carrier_name})")
+
+    raise typer.Exit(code=0 if result.has_nonstop else 1)
+
+
+def _run_batch_nonstop(checker, segments, check_date, fmt, verbose, quiet, json_mod):
+    """Run batch nonstop check and display results."""
+    # Progress callback
+    progress_lines = []
+
+    def progress_cb(current, total, label):
+        if not quiet:
+            typer.echo(f"  [{current}/{total}] {label}", err=True)
+
+    result = checker.check_batch(segments, check_date, progress_cb=progress_cb)
+
+    if fmt == "json":
+        typer.echo(json_mod.dumps(result.model_dump(mode="json"), indent=2))
+        raise typer.Exit(code=0 if result.all_clear else 1)
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+
+        table = Table(title=f"Nonstop Check — {check_date.isoformat()}", show_lines=False)
+        table.add_column("#", justify="right", style="dim")
+        table.add_column("Route", style="cyan")
+        table.add_column("Carrier", style="bold")
+        table.add_column("Status")
+        table.add_column("Flights", justify="right")
+        table.add_column("Alternatives")
+
+        for seg in result.segments:
+            r = seg.result
+            if r is None:
+                table.add_row(str(seg.index + 1), f"{seg.origin}-{seg.destination}", seg.carrier, "[yellow]ERROR[/]", "-", "-")
+                continue
+
+            if r.error:
+                status = "[yellow]ERROR[/]"
+            elif r.has_nonstop:
+                status = "[green]NONSTOP[/]"
+            else:
+                status = "[red]NO NONSTOP[/]"
+
+            alt_str = ", ".join(a.carrier for a in r.nonstop_alternatives) if r.nonstop_alternatives else "-"
+
+            table.add_row(
+                str(seg.index + 1),
+                f"{seg.origin}-{seg.destination}",
+                f"{seg.carrier} {r.carrier_name}",
+                status,
+                str(r.nonstop_flight_count) if not r.error else "-",
+                alt_str,
+            )
+
+        console.print(table)
+
+        # Summary
+        if result.all_clear:
+            console.print(f"\n[bold green]{result.nonstop_count}/{result.total} ALL CLEAR[/] — all segments have nonstop service")
+        else:
+            parts = []
+            if result.nonstop_count:
+                parts.append(f"[green]{result.nonstop_count} nonstop[/]")
+            if result.no_nonstop_count:
+                parts.append(f"[red]{result.no_nonstop_count} no nonstop[/]")
+            if result.error_count:
+                parts.append(f"[yellow]{result.error_count} error[/]")
+            console.print(f"\n{result.total} segments: {', '.join(parts)}")
+
+        if verbose:
+            console.print(f"[dim]API calls used: {result.api_calls_used}[/]")
+
+    except ImportError:
+        # Plain fallback
+        for seg in result.segments:
+            r = seg.result
+            if r and r.has_nonstop:
+                typer.echo(f"NONSTOP {seg.origin}-{seg.destination} {seg.carrier}")
+            elif r and r.error:
+                typer.echo(f"ERROR   {seg.origin}-{seg.destination} {seg.carrier}: {r.error}")
+            else:
+                typer.echo(f"NONE    {seg.origin}-{seg.destination} {seg.carrier}")
+        status_str = "ALL CLEAR" if result.all_clear else "INCOMPLETE"
+        typer.echo(f"\n{status_str}: {result.nonstop_count}/{result.total} nonstop")
+
+    raise typer.Exit(code=0 if result.all_clear else 1)
+
+
+# ---------------------------------------------------------------------------
+# Build command — route string to YAML
+# ---------------------------------------------------------------------------
+
+
+@app.command(name="build")
+def build(
+    route: Annotated[str, typer.Option("--route", "-r", help="Route: 'LAX-HND:JL,HND-SYD:JL,SYD-DOH:QR,DOH-LAX:QR'")] = "",
+    origin: Annotated[Optional[str], typer.Option("--origin", "-o", help="Origin airport (3-letter IATA)")] = None,
+    ticket_type: Annotated[str, typer.Option("--type", "-t", help="Ticket type (DONE4, LONE3, etc.)")] = "DONE4",
+    cabin: Annotated[str, typer.Option("--cabin", "-c", help="Cabin class")] = "business",
+    departure: Annotated[Optional[str], typer.Option("--departure", "-d", help="Departure date (ISO format)")] = None,
+    gap: Annotated[int, typer.Option("--gap", "-g", help="Days between stopovers")] = 4,
+    out: Annotated[Optional[str], typer.Option("--out", help="Write YAML to file")] = None,
+    validate: Annotated[bool, typer.Option("--validate", help="Run validation after building")] = False,
+    ntp: Annotated[bool, typer.Option("--ntp", help="Calculate NTP after building")] = False,
+    plain: PlainFlag = False,
+) -> None:
+    """Build a YAML itinerary from a route string.
+
+    Example:
+      rtw build --route "LAX-HND:JL,HND-SYD:JL,SYD-DOH:QR,DOH-LAX:QR" \\
+                --origin LAX --type DONE4 --departure 2026-04-01 --validate --ntp
+    """
+    import datetime
+
+    from rtw.models import CabinClass, Itinerary, Segment, SegmentType, Ticket, TicketType
+
+    if not route:
+        _error_panel("--route is required.\n  Example: --route 'LAX-HND:JL,HND-SYD:JL'")
+        raise typer.Exit(code=2)
+
+    # Parse segments
+    try:
+        parsed = _parse_route_string(route)
+    except typer.BadParameter as exc:
+        _error_panel(str(exc))
+        raise typer.Exit(code=2)
+
+    # Infer origin from first segment if not provided
+    if not origin:
+        origin = parsed[0][0]
+
+    origin = origin.upper()
+
+    # Parse ticket type
+    try:
+        tt = TicketType(ticket_type.upper())
+    except ValueError:
+        valid = ", ".join(t.value for t in TicketType)
+        _error_panel(f"Invalid ticket type: {ticket_type}\n  Valid: {valid}")
+        raise typer.Exit(code=2)
+
+    # Parse cabin
+    try:
+        cab = CabinClass(cabin.lower())
+    except ValueError:
+        valid = ", ".join(c.value for c in CabinClass)
+        _error_panel(f"Invalid cabin: {cabin}\n  Valid: {valid}")
+        raise typer.Exit(code=2)
+
+    # Parse departure date
+    if departure:
+        try:
+            dep_date = datetime.date.fromisoformat(departure)
+        except ValueError:
+            _error_panel(f"Invalid date: {departure}\n  Expected: YYYY-MM-DD")
+            raise typer.Exit(code=2)
+    else:
+        dep_date = datetime.date.today() + datetime.timedelta(days=60)
+
+    # Build segments with dates
+    segments = []
+    current_date = dep_date
+    for i, (from_apt, to_apt, carrier_code) in enumerate(parsed):
+        is_last = i == len(parsed) - 1
+        seg_type = SegmentType.FINAL if is_last else SegmentType.STOPOVER
+
+        segments.append(
+            Segment(
+                **{
+                    "from": from_apt,
+                    "to": to_apt,
+                    "carrier": carrier_code,
+                    "date": current_date,
+                    "type": seg_type,
+                }
+            )
+        )
+
+        if not is_last:
+            current_date = current_date + datetime.timedelta(days=gap)
+
+    # Build itinerary
+    ticket = Ticket(
+        type=tt,
+        cabin=cab,
+        origin=origin,
+        passengers=1,
+        departure=dep_date,
+        plating_carrier="AA",
+    )
+    itinerary = Itinerary(ticket=ticket, segments=segments)
+
+    # Serialize to YAML
+    segments_data = []
+    for seg in itinerary.segments:
+        entry: dict = {
+            "from": seg.from_airport,
+            "to": seg.to_airport,
+            "carrier": seg.carrier,
+            "type": seg.type.value,
+        }
+        if seg.date:
+            entry["date"] = seg.date.isoformat()
+        segments_data.append(entry)
+
+    yaml_data = {
+        "ticket": {
+            "type": itinerary.ticket.type.value,
+            "cabin": itinerary.ticket.cabin.value,
+            "origin": itinerary.ticket.origin,
+            "passengers": itinerary.ticket.passengers,
+            "departure": dep_date.isoformat(),
+            "plating_carrier": "AA",
+        },
+        "segments": segments_data,
+    }
+
+    yaml_str = yaml.dump(yaml_data, default_flow_style=False, sort_keys=False)
+
+    # Output
+    if out:
+        out_path = Path(out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(yaml_str)
+        typer.echo(f"Written to {out_path}")
+    else:
+        typer.echo(yaml_str)
+
+    # Optional validation
+    if validate:
+        from rtw.validator import Validator
+
+        validator = Validator()
+        report = validator.validate(itinerary)
+        total_rules = len(report.results)
+        violations = report.violations
+        if report.passed:
+            typer.echo(f"Validation: PASS ({total_rules} rules checked, 0 violations)")
+        else:
+            typer.echo(f"Validation: FAIL ({len(violations)} violations)")
+            for v in violations:
+                typer.echo(f"  - {v.message}")
+            raise typer.Exit(code=1)
+
+    # Optional NTP
+    if ntp:
+        from rtw.ntp import NTPCalculator
+
+        calc = NTPCalculator()
+        estimates = calc.calculate(itinerary)
+        total_ntp = sum(e.estimated_ntp for e in estimates)
+        total_dist = sum(e.distance_miles for e in estimates)
+        typer.echo(f"NTP: {total_ntp:,.0f} from {total_dist:,.0f} miles ({len(estimates)} segments)")
+        for e in estimates:
+            rate_str = f"{e.rate:.0f}%" if e.rate else "rev"
+            typer.echo(f"  {e.route:10s} {e.carrier:3s} {e.distance_miles:>6,.0f} mi  {rate_str:>5s}  {e.estimated_ntp:>6,.0f} NTP")
+
+
+# ---------------------------------------------------------------------------
+# Scan dates command — D-class date scanner
+# ---------------------------------------------------------------------------
+
+
+@app.command(name="scan-dates")
+def scan_dates(
+    origin: Annotated[str, typer.Argument(help="Origin airport (3-letter IATA)")],
+    dest: Annotated[str, typer.Argument(help="Destination airport (3-letter IATA)")],
+    carrier: Annotated[str, typer.Argument(help="Carrier (2-letter IATA)")],
+    date_from: Annotated[str, typer.Option("--from", help="Start date (ISO format)")] = "",
+    date_to: Annotated[str, typer.Option("--to", help="End date (ISO format)")] = "",
+    booking_class: Annotated[str, typer.Option("--class", "-c", help="Booking class")] = "D",
+    nonstop_only: Annotated[bool, typer.Option("--nonstop-only", help="Only show dates with nonstop D-class")] = False,
+    dow: Annotated[Optional[str], typer.Option("--dow", help="Days of week filter: mon,wed,thu")] = None,
+    plain: PlainFlag = False,
+    verbose: VerboseFlag = False,
+    quiet: QuietFlag = False,
+) -> None:
+    """Scan a date range for D-class availability on one route.
+
+    Example:
+      rtw scan-dates HEL LAX AY --from 2026-04-01 --to 2026-04-30
+      rtw scan-dates HEL LAX AY --from 2026-04-01 --to 2026-04-30 --nonstop-only --dow mon,wed,thu
+    """
+    import datetime
+
+    _setup_logging(verbose, quiet)
+
+    # Parse dates
+    if not date_from:
+        start = datetime.date.today() + datetime.timedelta(days=30)
+    else:
+        try:
+            start = datetime.date.fromisoformat(date_from)
+        except ValueError:
+            _error_panel(f"Invalid --from date: {date_from}\n  Expected: YYYY-MM-DD")
+            raise typer.Exit(code=2)
+
+    if not date_to:
+        end = start + datetime.timedelta(days=30)
+    else:
+        try:
+            end = datetime.date.fromisoformat(date_to)
+        except ValueError:
+            _error_panel(f"Invalid --to date: {date_to}\n  Expected: YYYY-MM-DD")
+            raise typer.Exit(code=2)
+
+    if end < start:
+        _error_panel("--to must not be before --from")
+        raise typer.Exit(code=2)
+
+    # Parse day-of-week filter
+    dow_filter: Optional[set[int]] = None
+    if dow:
+        day_map = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+        dow_filter = set()
+        for d in dow.lower().split(","):
+            d = d.strip()
+            if d not in day_map:
+                _error_panel(f"Invalid day: {d}\n  Valid: mon,tue,wed,thu,fri,sat,sun")
+                raise typer.Exit(code=2)
+            dow_filter.add(day_map[d])
+
+    origin = origin.upper()
+    dest = dest.upper()
+    carrier = carrier.upper()
+
+    # Check ExpertFlyer credentials
+    from rtw.scraper.expertflyer import ExpertFlyerScraper
+
+    scraper = ExpertFlyerScraper()
+
+    # Build date list
+    dates = []
+    current = start
+    while current <= end:
+        if dow_filter is None or current.weekday() in dow_filter:
+            dates.append(current)
+        current += datetime.timedelta(days=1)
+
+    if not dates:
+        _error_panel("No dates match the given range and day-of-week filter.")
+        raise typer.Exit(code=2)
+
+    typer.echo(f"Scanning {origin}-{dest} {carrier} {booking_class}-class: {len(dates)} dates ({start} to {end})")
+
+    # Scan each date
+    results = []
+    best_ns_date = None
+    best_ns_seats = 0
+    nonstop_dates = 0
+
+    for d in dates:
+        try:
+            result = scraper.check_availability(origin, dest, d, carrier=carrier, booking_class=booking_class)
+            if result is None:
+                _error_panel("ExpertFlyer login failed. Run: python3 -m rtw login expertflyer")
+                raise typer.Exit(code=2)
+
+            ns_flights = result.nonstop_flights or []
+            ns_seats = max((f.seats for f in ns_flights), default=0) if ns_flights else 0
+            total_seats = result.seats
+            ns_count = len(ns_flights)
+            conn_count = result.available_count - ns_count
+
+            if ns_seats > 0:
+                nonstop_dates += 1
+                if ns_seats > best_ns_seats:
+                    best_ns_seats = ns_seats
+                    best_ns_date = d
+
+            if nonstop_only and ns_seats == 0:
+                continue
+
+            # Find best nonstop flight number
+            best_fn = "-"
+            if ns_flights:
+                best_f = max(ns_flights, key=lambda f: f.seats)
+                best_fn = best_f.flight_number or f"{carrier}?"
+
+            results.append((d, total_seats, ns_seats, ns_count, conn_count, best_fn))
+
+        except typer.Exit:
+            raise
+        except Exception as exc:
+            if "login" in str(exc).lower() or "session" in str(exc).lower():
+                _error_panel(f"ExpertFlyer session error: {exc}")
+                raise typer.Exit(code=2)
+            results.append((d, -1, 0, 0, 0, f"ERR"))
+
+    scraper.close()
+
+    # Display results
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title=f"{origin}-{dest} {carrier} {booking_class}-class Date Scan")
+        table.add_column("Date", style="cyan")
+        table.add_column("Day", style="dim")
+        table.add_column(f"{booking_class} Total", justify="right")
+        table.add_column("Nonstop", justify="right")
+        table.add_column("Conn", justify="right", style="dim")
+        table.add_column("Best Flight")
+
+        for d, total, ns, ns_cnt, conn, fn in results:
+            if total < 0:
+                table.add_row(d.isoformat(), d.strftime("%a"), "[red]ERR[/]", "-", "-", fn)
+            elif ns > 0:
+                table.add_row(
+                    d.isoformat(), d.strftime("%a"),
+                    f"{booking_class}{total}", f"[bold green]{booking_class}{ns}[/] ({ns_cnt})",
+                    str(conn), f"[green]{fn}[/]",
+                )
+            else:
+                table.add_row(
+                    d.isoformat(), d.strftime("%a"),
+                    f"{booking_class}{total}", f"[dim]{booking_class}0[/]",
+                    str(conn), "[dim]-[/]",
+                )
+
+        console.print(table)
+
+    except ImportError:
+        for d, total, ns, ns_cnt, conn, fn in results:
+            marker = "NONSTOP" if ns > 0 else "conn" if total > 0 else "ERR" if total < 0 else "none"
+            typer.echo(f"  {d} ({d.strftime('%a')})  {booking_class}{total}  ns={ns}  {marker}  {fn}")
+
+    # Summary
+    total_checked = len(dates)
+    if nonstop_dates > 0:
+        typer.echo(f"\n{nonstop_dates}/{total_checked} dates have nonstop {booking_class}-class. Best: {best_ns_date} {booking_class}{best_ns_seats}")
+    else:
+        typer.echo(f"\n0/{total_checked} dates have nonstop {booking_class}-class.")
 
 
 # ---------------------------------------------------------------------------
