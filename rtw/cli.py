@@ -1315,11 +1315,47 @@ def search(
             rank_by=rank_by,
         )
 
-        # Phase 2: Generate candidates
-        candidates = generate_candidates(query)
+        # Phase 2: Generate candidates (with optional nonstop pre-filter)
+        ns_filter = None
+        if nonstop:
+            from rtw.nonstop.checker import NonstopChecker
+            from rtw.scraper.serpapi_flights import serpapi_available
+
+            if serpapi_available():
+                ns_checker = NonstopChecker(cache=ScrapeCache())
+                ns_date = df  # Use search start date for nonstop check
+                ns_cache: dict[tuple[str, str, str], bool] = {}
+
+                def _nonstop_filter(o: str, d: str, c: str) -> bool:
+                    key = (o.upper(), d.upper(), c.upper())
+                    if key not in ns_cache:
+                        result = ns_checker.check(o, d, c, ns_date)
+                        ns_cache[key] = result.has_nonstop
+                    return ns_cache[key]
+
+                ns_filter = _nonstop_filter
+                if not quiet:
+                    typer.echo("Nonstop pre-filter active (--nonstop).", err=True)
+            else:
+                if not quiet:
+                    typer.echo(
+                        "Warning: --nonstop used but SERPAPI_API_KEY not set. "
+                        "Skipping nonstop pre-filter.",
+                        err=True,
+                    )
+
+        candidates = generate_candidates(query, nonstop_filter=ns_filter)
         if not candidates:
             if not quiet:
-                _error_panel("No valid itinerary options found. Try different cities or ticket type.")
+                msg = "No valid itinerary options found."
+                if nonstop and ns_filter:
+                    msg += (
+                        "\n\nThe --nonstop filter may have eliminated all candidates.\n"
+                        "Try without --nonstop, or run `rtw check-nonstop` to verify routes."
+                    )
+                else:
+                    msg += " Try different cities or ticket type."
+                _error_panel(msg)
             raise typer.Exit(code=1)
 
         # Phase 3: Score and rank (initial)

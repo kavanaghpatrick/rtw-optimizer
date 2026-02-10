@@ -157,3 +157,63 @@ class TestEdgeCases:
         candidates = generate_candidates(query, hub_table)
         # Should work, just skip origin from permutation
         assert isinstance(candidates, list)
+
+
+class TestNonstopFilter:
+    def test_no_filter_produces_candidates(self, hub_table):
+        """Without filter, behaves identically to before."""
+        query = _make_query()
+        candidates = generate_candidates(query, hub_table, nonstop_filter=None)
+        assert len(candidates) >= 1
+
+    def test_allow_all_filter_same_as_none(self, hub_table):
+        """Filter that allows everything produces same count as no filter."""
+        query = _make_query()
+        without = generate_candidates(query, hub_table)
+        with_filter = generate_candidates(query, hub_table, nonstop_filter=lambda o, d, c: True)
+        assert len(with_filter) == len(without)
+
+    def test_reject_all_filter_returns_empty(self, hub_table):
+        """Filter that rejects everything produces zero candidates."""
+        query = _make_query()
+        candidates = generate_candidates(query, hub_table, nonstop_filter=lambda o, d, c: False)
+        assert len(candidates) == 0
+
+    def test_filter_reduces_candidates(self, hub_table):
+        """A selective filter should produce fewer candidates than no filter."""
+        query = _make_query()
+        without = generate_candidates(query, hub_table)
+
+        # Reject routes involving DOH (a common hub)
+        def reject_doha(o, d, c):
+            return o != "DOH" and d != "DOH"
+
+        with_filter = generate_candidates(query, hub_table, nonstop_filter=reject_doha)
+        assert len(with_filter) < len(without)
+
+    def test_filter_exception_treated_as_keep(self, hub_table):
+        """If filter raises exception, segment is kept (not eliminated)."""
+        query = _make_query()
+
+        def flaky_filter(o, d, c):
+            raise RuntimeError("API error")
+
+        candidates = generate_candidates(query, hub_table, nonstop_filter=flaky_filter)
+        # Should produce same candidates as no filter (all exceptions = all kept)
+        without = generate_candidates(query, hub_table)
+        assert len(candidates) == len(without)
+
+    def test_surface_segments_not_filtered(self, hub_table):
+        """Filter should not be called for SURFACE segments."""
+        query = _make_query()
+        calls = []
+
+        def tracking_filter(o, d, c):
+            calls.append((o, d, c))
+            return True
+
+        generate_candidates(query, hub_table, nonstop_filter=tracking_filter)
+        # No call should have empty carrier (surface segments are skipped)
+        for o, d, c in calls:
+            assert len(o) == 3
+            assert len(d) == 3

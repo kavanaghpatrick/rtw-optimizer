@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import itertools
 import logging
-from typing import Optional
+from typing import Callable, Optional
 
 from rtw.continents import get_continent
 from rtw.models import (
@@ -206,6 +206,7 @@ def _route_key(route: list[str]) -> str:
 def generate_candidates(
     query: SearchQuery,
     hub_table: Optional[HubTable] = None,
+    nonstop_filter: Optional[Callable[[str, str, str], bool]] = None,
 ) -> list[CandidateItinerary]:
     """Generate valid RTW itinerary candidates.
 
@@ -215,6 +216,10 @@ def generate_candidates(
     Args:
         query: Validated search query.
         hub_table: Hub connection table (loads default if None).
+        nonstop_filter: Optional callback ``(origin, dest, carrier) -> bool``.
+            When provided, each flown segment is tested. If any segment
+            returns False the candidate is eliminated. Exceptions are
+            treated as "unknown" (segment retained).
 
     Returns:
         List of valid CandidateItinerary objects, capped at 2000 total.
@@ -290,6 +295,21 @@ def generate_candidates(
             report = validator.validate(itinerary)
             if not report.passed:
                 continue
+
+            # Nonstop filter: eliminate candidates with non-nonstop segments
+            if nonstop_filter is not None:
+                filtered_out = False
+                for seg in itinerary.segments:
+                    if seg.type == SegmentType.SURFACE:
+                        continue
+                    try:
+                        if not nonstop_filter(seg.from_airport, seg.to_airport, seg.carrier or ""):
+                            filtered_out = True
+                            break
+                    except Exception:
+                        pass  # Treat errors as "unknown" — keep segment
+                if filtered_out:
+                    continue
 
             # Build route segments for display
             route_segments = [
