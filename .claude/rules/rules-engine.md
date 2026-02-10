@@ -6,8 +6,8 @@ paths:
 # Rules Engine Guidelines
 
 - NEVER invent or guess fare rule constraints. All rules derive from IATA Rule 3015.
-- Before modifying any rule, read `docs/01-fare-rules.md` for the authoritative source text.
-- For optimization context, see `docs/12-rtw-optimization-guide.md`.
+- Before modifying any rule, read `01-fare-rules.md` (project root) for the authoritative source text.
+- For optimization context, see `12-rtw-optimization-guide.md` (project root).
 - Each rule is a function in a separate file: `segments.py`, `carriers.py`, `direction.py`, etc.
 - Rules return a list of `RuleResult` with severity: `error` (blocks validation) or `warning` (informational).
 - The validator (`rtw/validator.py`) builds a `ValidationContext` then calls each rule. Rules do NOT call each other.

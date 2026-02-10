@@ -16,20 +16,28 @@ Read the YAML frontmatter `description:` field from each file in `.claude/comman
 **Domain Workflow** (interactive, for trip planning):
 - `/rtw-plan` — [read description from frontmatter]
 - `/rtw-search` — [read description from frontmatter]
+- `/rtw-build` — [read description from frontmatter]
 - `/rtw-analyze` — [read description from frontmatter]
 - `/rtw-booking` — [read description from frontmatter]
 - `/rtw-compare` — [read description from frontmatter]
 - `/rtw-lookup` — [read description from frontmatter]
 
 **Developer Tools** (fast, for project health):
+- `/rtw-init` — [read description from frontmatter]
 - `/rtw-verify` — [read description from frontmatter]
 - `/rtw-status` — [read description from frontmatter]
 - `/rtw-setup` — [read description from frontmatter]
 - `/rtw-help` — [read description from frontmatter]
 
-Show the typical workflow:
+**CLI Commands** (direct, no slash prefix):
+- `rtw check-nonstop` — Verify nonstop service on a city-pair or route
+- `rtw build` — Generate YAML itinerary from route string
+- `rtw scan-dates` — Scan date range for D-class availability
+
+Show the typical workflows:
 ```
 Plan → Search → Verify (D-class) → Analyze → Book
+Build route: check-nonstop → build → verify → scan-dates → analyze
 ```
 
 ## Step 2: Topic Deep Dive (if argument provided)

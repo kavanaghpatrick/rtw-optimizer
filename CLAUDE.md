@@ -10,7 +10,7 @@ oneworld Explorer round-the-world ticket optimizer. Validates itineraries agains
 | CLI | Typer + Rich |
 | Models | Pydantic v2 |
 | Package mgr | uv (use `uv run`, `uv sync`) |
-| Tests | pytest (940+ tests) |
+| Tests | pytest (980+ tests) |
 | Lint | ruff |
 | Scraping | Playwright + httpx |
 
@@ -64,6 +64,7 @@ python3 -m rtw verify                  # Verify D-class availability (needs Expe
 | Value | `rtw/value.py` | Per-segment value rating (cost vs distance) |
 | Booking | `rtw/booking.py` | Phone script + GDS command generator |
 | Search | `rtw/search/` | Route search engine (models, scorer, display) |
+| Nonstop | `rtw/nonstop/` | Nonstop route pre-verification via SerpAPI |
 | Verify | `rtw/verify/` | D-class verification (models, state, orchestrator) |
 | Scraper | `rtw/scraper/` | Google Flights (SerpAPI) + ExpertFlyer scrapers |
 | Continents | `rtw/continents.py` | Airport → continent mapping with overrides |
@@ -109,8 +110,8 @@ python3 -m rtw verify                  # Verify D-class availability (needs Expe
 | File | Content |
 |------|---------|
 | `docs/ARCHITECTURE.md` | Full architecture documentation (15KB) |
-| `docs/01-fare-rules.md` | Authoritative IATA Rule 3015 fare rules |
-| `docs/12-rtw-optimization-guide.md` | RTW trip optimization strategies |
+| `01-fare-rules.md` | Authoritative IATA Rule 3015 fare rules (project root) |
+| `12-rtw-optimization-guide.md` | RTW trip optimization strategies (project root) |
 | `rtw/data/carriers.yaml` | oneworld carrier list (16 carriers incl. WY, S7 ineligible) |
 | `rtw/data/fares.yaml` | Base fare table: AONE/DONE/LONE x 8 origins |
 | `rtw/data/continents.yaml` | Airport → continent/TC mappings |

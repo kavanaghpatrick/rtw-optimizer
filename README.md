@@ -26,6 +26,9 @@ Plan your trip       Search routes       Check availability     Analyze costs   
 | **Search** | Generate valid RTW routes, score them, and optionally check live Google Flights pricing |
 | **Verify** | Check D-class seat availability on ExpertFlyer — see exactly which flights have seats |
 | **Booking** | Generate a phone script with GDS commands for calling the AA RTW desk |
+| **Build** | Generate a YAML itinerary from a route string with validation and NTP |
+| **Scan Dates** | Scan a date range for D-class availability on a specific route |
+| **Check Nonstop** | Verify nonstop service exists on a city-pair before building routes |
 
 ## Quick Start
 
@@ -46,7 +49,7 @@ uv sync
 
 ```bash
 python3 -m rtw --help          # Show all commands
-uv run pytest -x -q            # Run test suite (840 tests)
+uv run pytest -x -q            # Run test suite (980+ tests)
 ```
 
 ### Optional: API Keys
@@ -132,6 +135,41 @@ for r in e.compare_origins(TicketType('DONE4'))[:5]:
 ```
 
 A DONE4 (business, 4 continents) ticket from Cairo costs $4,000 vs $10,500 from New York -- a positioning flight to Cairo can save $6,500.
+
+### Build a Route
+
+Generate a validated YAML itinerary from a route string:
+
+```bash
+# Print YAML + validation + NTP
+python3 -m rtw build --route "LAX-HND:JL,HND-SYD:JL,SYD-DOH:QR,DOH-LAX:QR" \
+  --origin LAX --type DONE4 --departure 2026-04-01 --validate --ntp
+
+# Write to file
+python3 -m rtw build --route "LAX-HND:JL,HND-SYD:JL,SYD-DOH:QR,DOH-LAX:QR" \
+  --origin LAX --out itineraries/my-trip.yaml
+```
+
+### Check Nonstop Service
+
+Verify a carrier actually flies nonstop between two cities before committing to a route:
+
+```bash
+# Single city-pair
+python3 -m rtw check-nonstop LHR HEL AY
+
+# Batch check entire route
+python3 -m rtw check-nonstop --route "LAX-HND:JL,HND-SYD:JL,SYD-DOH:QR,DOH-LAX:QR"
+```
+
+### Scan Dates for D-Class
+
+Find which dates have D-class availability on a specific route:
+
+```bash
+python3 -m rtw scan-dates DOH LAX QR --from 2026-04-01 --to 2026-04-30
+python3 -m rtw scan-dates HEL LAX AY --from 2026-04-01 --to 2026-04-30 --nonstop-only --dow mon,wed,thu
+```
 
 ### Verify D-Class Availability
 
@@ -254,7 +292,7 @@ Low-YQ carriers (JL, AA, AY, IB) can save hundreds of dollars per segment compar
 
 ## Using with Claude Code
 
-This project includes a full [Claude Code](https://claude.ai/claude-code) integration. When you open the project in Claude Code, it automatically loads project context, domain knowledge, and 11 slash commands.
+This project includes a full [Claude Code](https://claude.ai/claude-code) integration. When you open the project in Claude Code, it automatically loads project context, domain knowledge, and 12 slash commands.
 
 ### First-Time Setup
 
@@ -274,6 +312,7 @@ This walks you through setting up SerpAPI and ExpertFlyer credentials, installin
 | `/rtw-search` | Search for routes (accepts city codes or reads from saved plan) |
 | `/rtw-analyze` | Full pipeline on an itinerary: validate + cost + NTP + value |
 | `/rtw-booking` | Generate phone booking script with GDS commands |
+| `/rtw-build` | Full route-building workflow: nonstop check → build → verify → analyze |
 | `/rtw-compare` | Compare ticket prices across origin cities |
 | `/rtw-lookup` | Quick airport-to-continent lookup |
 
@@ -291,9 +330,13 @@ This walks you through setting up SerpAPI and ExpertFlyer credentials, installin
 
 1. `/rtw-plan` -- Answer questions about origin, cities, dates, ticket type
 2. `/rtw-search` -- Claude runs the search and shows ranked options
-3. `rtw verify` -- Check D-class availability on the best options
+3. `python3 -m rtw verify` -- Check D-class availability on the best options
 4. `/rtw-analyze` -- Full cost/NTP/value analysis
 5. `/rtw-booking` -- Generate the script to call AA and book it
+
+**Route building** (manual, segment-by-segment):
+
+1. `/rtw-build` -- Interactive workflow: define segments, verify nonstop, build YAML, check D-class
 
 Claude understands the domain vocabulary (Rule 3015, NTP, YQ, D-class, tariff conferences) and can explain trade-offs, suggest alternatives, and help debug validation failures.
 
@@ -320,6 +363,9 @@ rtw/
 │   ├── generator.py    # Route generation
 │   ├── scorer.py       # Route ranking
 │   └── display.py      # Search result formatting
+├── nonstop/            # Nonstop route pre-verification
+│   ├── checker.py      # SerpAPI nonstop lookup + oneworld alternatives
+│   └── models.py       # NonstopRoute, NonstopResult
 ├── verify/             # D-class availability verification
 │   ├── models.py       # DClassResult, FlightAvailability, etc.
 │   ├── verifier.py     # ExpertFlyer verification orchestrator
@@ -343,7 +389,7 @@ rtw/
 ### Running Tests
 
 ```bash
-uv run pytest                          # All tests (796)
+uv run pytest                          # All tests (980+)
 uv run pytest tests/test_cost.py -x    # Single file, stop on failure
 uv run pytest -m "not slow" -x         # Skip slow tests
 uv run pytest -k "test_validate" -v    # Filter by name, verbose
