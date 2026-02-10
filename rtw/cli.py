@@ -1788,6 +1788,354 @@ def _run_batch_nonstop(checker, segments, check_date, fmt, verbose, quiet, json_
 
 
 # ---------------------------------------------------------------------------
+# Build command — route string to YAML
+# ---------------------------------------------------------------------------
+
+
+@app.command(name="build")
+def build(
+    route: Annotated[str, typer.Option("--route", "-r", help="Route: 'LAX-HND:JL,HND-SYD:JL,SYD-DOH:QR,DOH-LAX:QR'")] = "",
+    origin: Annotated[Optional[str], typer.Option("--origin", "-o", help="Origin airport (3-letter IATA)")] = None,
+    ticket_type: Annotated[str, typer.Option("--type", "-t", help="Ticket type (DONE4, LONE3, etc.)")] = "DONE4",
+    cabin: Annotated[str, typer.Option("--cabin", "-c", help="Cabin class")] = "business",
+    departure: Annotated[Optional[str], typer.Option("--departure", "-d", help="Departure date (ISO format)")] = None,
+    gap: Annotated[int, typer.Option("--gap", "-g", help="Days between stopovers")] = 4,
+    out: Annotated[Optional[str], typer.Option("--out", help="Write YAML to file")] = None,
+    validate: Annotated[bool, typer.Option("--validate", help="Run validation after building")] = False,
+    ntp: Annotated[bool, typer.Option("--ntp", help="Calculate NTP after building")] = False,
+    plain: PlainFlag = False,
+) -> None:
+    """Build a YAML itinerary from a route string.
+
+    Example:
+      rtw build --route "LAX-HND:JL,HND-SYD:JL,SYD-DOH:QR,DOH-LAX:QR" \\
+                --origin LAX --type DONE4 --departure 2026-04-01 --validate --ntp
+    """
+    import datetime
+
+    from rtw.models import CabinClass, Itinerary, Segment, SegmentType, Ticket, TicketType
+
+    if not route:
+        _error_panel("--route is required.\n  Example: --route 'LAX-HND:JL,HND-SYD:JL'")
+        raise typer.Exit(code=2)
+
+    # Parse segments
+    try:
+        parsed = _parse_route_string(route)
+    except typer.BadParameter as exc:
+        _error_panel(str(exc))
+        raise typer.Exit(code=2)
+
+    # Infer origin from first segment if not provided
+    if not origin:
+        origin = parsed[0][0]
+
+    origin = origin.upper()
+
+    # Parse ticket type
+    try:
+        tt = TicketType(ticket_type.upper())
+    except ValueError:
+        valid = ", ".join(t.value for t in TicketType)
+        _error_panel(f"Invalid ticket type: {ticket_type}\n  Valid: {valid}")
+        raise typer.Exit(code=2)
+
+    # Parse cabin
+    try:
+        cab = CabinClass(cabin.lower())
+    except ValueError:
+        valid = ", ".join(c.value for c in CabinClass)
+        _error_panel(f"Invalid cabin: {cabin}\n  Valid: {valid}")
+        raise typer.Exit(code=2)
+
+    # Parse departure date
+    if departure:
+        try:
+            dep_date = datetime.date.fromisoformat(departure)
+        except ValueError:
+            _error_panel(f"Invalid date: {departure}\n  Expected: YYYY-MM-DD")
+            raise typer.Exit(code=2)
+    else:
+        dep_date = datetime.date.today() + datetime.timedelta(days=60)
+
+    # Build segments with dates
+    segments = []
+    current_date = dep_date
+    for i, (from_apt, to_apt, carrier_code) in enumerate(parsed):
+        is_last = i == len(parsed) - 1
+        seg_type = SegmentType.FINAL if is_last else SegmentType.STOPOVER
+
+        segments.append(
+            Segment(
+                **{
+                    "from": from_apt,
+                    "to": to_apt,
+                    "carrier": carrier_code,
+                    "date": current_date,
+                    "type": seg_type,
+                }
+            )
+        )
+
+        if not is_last:
+            current_date = current_date + datetime.timedelta(days=gap)
+
+    # Build itinerary
+    ticket = Ticket(
+        type=tt,
+        cabin=cab,
+        origin=origin,
+        passengers=1,
+        departure=dep_date,
+        plating_carrier="AA",
+    )
+    itinerary = Itinerary(ticket=ticket, segments=segments)
+
+    # Serialize to YAML
+    segments_data = []
+    for seg in itinerary.segments:
+        entry: dict = {
+            "from": seg.from_airport,
+            "to": seg.to_airport,
+            "carrier": seg.carrier,
+            "type": seg.type.value,
+        }
+        if seg.date:
+            entry["date"] = seg.date.isoformat()
+        segments_data.append(entry)
+
+    yaml_data = {
+        "ticket": {
+            "type": itinerary.ticket.type.value,
+            "cabin": itinerary.ticket.cabin.value,
+            "origin": itinerary.ticket.origin,
+            "passengers": itinerary.ticket.passengers,
+            "departure": dep_date.isoformat(),
+            "plating_carrier": "AA",
+        },
+        "segments": segments_data,
+    }
+
+    yaml_str = yaml.dump(yaml_data, default_flow_style=False, sort_keys=False)
+
+    # Output
+    if out:
+        out_path = Path(out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(yaml_str)
+        typer.echo(f"Written to {out_path}")
+    else:
+        typer.echo(yaml_str)
+
+    # Optional validation
+    if validate:
+        from rtw.validator import Validator
+
+        validator = Validator()
+        report = validator.validate(itinerary)
+        total_rules = len(report.results)
+        violations = report.violations
+        if report.passed:
+            typer.echo(f"Validation: PASS ({total_rules} rules checked, 0 violations)")
+        else:
+            typer.echo(f"Validation: FAIL ({len(violations)} violations)")
+            for v in violations:
+                typer.echo(f"  - {v.message}")
+            raise typer.Exit(code=1)
+
+    # Optional NTP
+    if ntp:
+        from rtw.ntp import NTPCalculator
+
+        calc = NTPCalculator()
+        estimates = calc.calculate(itinerary)
+        total_ntp = sum(e.estimated_ntp for e in estimates)
+        total_dist = sum(e.distance_miles for e in estimates)
+        typer.echo(f"NTP: {total_ntp:,.0f} from {total_dist:,.0f} miles ({len(estimates)} segments)")
+        for e in estimates:
+            rate_str = f"{e.rate:.0f}%" if e.rate else "rev"
+            typer.echo(f"  {e.route:10s} {e.carrier:3s} {e.distance_miles:>6,.0f} mi  {rate_str:>5s}  {e.estimated_ntp:>6,.0f} NTP")
+
+
+# ---------------------------------------------------------------------------
+# Scan dates command — D-class date scanner
+# ---------------------------------------------------------------------------
+
+
+@app.command(name="scan-dates")
+def scan_dates(
+    origin: Annotated[str, typer.Argument(help="Origin airport (3-letter IATA)")],
+    dest: Annotated[str, typer.Argument(help="Destination airport (3-letter IATA)")],
+    carrier: Annotated[str, typer.Argument(help="Carrier (2-letter IATA)")],
+    date_from: Annotated[str, typer.Option("--from", help="Start date (ISO format)")] = "",
+    date_to: Annotated[str, typer.Option("--to", help="End date (ISO format)")] = "",
+    booking_class: Annotated[str, typer.Option("--class", "-c", help="Booking class")] = "D",
+    nonstop_only: Annotated[bool, typer.Option("--nonstop-only", help="Only show dates with nonstop D-class")] = False,
+    dow: Annotated[Optional[str], typer.Option("--dow", help="Days of week filter: mon,wed,thu")] = None,
+    plain: PlainFlag = False,
+    verbose: VerboseFlag = False,
+    quiet: QuietFlag = False,
+) -> None:
+    """Scan a date range for D-class availability on one route.
+
+    Example:
+      rtw scan-dates HEL LAX AY --from 2026-04-01 --to 2026-04-30
+      rtw scan-dates HEL LAX AY --from 2026-04-01 --to 2026-04-30 --nonstop-only --dow mon,wed,thu
+    """
+    import datetime
+
+    _setup_logging(verbose, quiet)
+
+    # Parse dates
+    if not date_from:
+        start = datetime.date.today() + datetime.timedelta(days=30)
+    else:
+        try:
+            start = datetime.date.fromisoformat(date_from)
+        except ValueError:
+            _error_panel(f"Invalid --from date: {date_from}\n  Expected: YYYY-MM-DD")
+            raise typer.Exit(code=2)
+
+    if not date_to:
+        end = start + datetime.timedelta(days=30)
+    else:
+        try:
+            end = datetime.date.fromisoformat(date_to)
+        except ValueError:
+            _error_panel(f"Invalid --to date: {date_to}\n  Expected: YYYY-MM-DD")
+            raise typer.Exit(code=2)
+
+    if end < start:
+        _error_panel("--to must not be before --from")
+        raise typer.Exit(code=2)
+
+    # Parse day-of-week filter
+    dow_filter: Optional[set[int]] = None
+    if dow:
+        day_map = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+        dow_filter = set()
+        for d in dow.lower().split(","):
+            d = d.strip()
+            if d not in day_map:
+                _error_panel(f"Invalid day: {d}\n  Valid: mon,tue,wed,thu,fri,sat,sun")
+                raise typer.Exit(code=2)
+            dow_filter.add(day_map[d])
+
+    origin = origin.upper()
+    dest = dest.upper()
+    carrier = carrier.upper()
+
+    # Check ExpertFlyer credentials
+    from rtw.scraper.expertflyer import ExpertFlyerScraper
+
+    scraper = ExpertFlyerScraper()
+
+    # Build date list
+    dates = []
+    current = start
+    while current <= end:
+        if dow_filter is None or current.weekday() in dow_filter:
+            dates.append(current)
+        current += datetime.timedelta(days=1)
+
+    if not dates:
+        _error_panel("No dates match the given range and day-of-week filter.")
+        raise typer.Exit(code=2)
+
+    typer.echo(f"Scanning {origin}-{dest} {carrier} {booking_class}-class: {len(dates)} dates ({start} to {end})")
+
+    # Scan each date
+    results = []
+    best_ns_date = None
+    best_ns_seats = 0
+    nonstop_dates = 0
+
+    for d in dates:
+        try:
+            result = scraper.check_availability(origin, dest, d, carrier=carrier, booking_class=booking_class)
+            if result is None:
+                _error_panel("ExpertFlyer login failed. Run: python3 -m rtw login expertflyer")
+                raise typer.Exit(code=2)
+
+            ns_flights = result.nonstop_flights or []
+            ns_seats = max((f.seats for f in ns_flights), default=0) if ns_flights else 0
+            total_seats = result.seats
+            ns_count = len(ns_flights)
+            conn_count = result.available_count - ns_count
+
+            if ns_seats > 0:
+                nonstop_dates += 1
+                if ns_seats > best_ns_seats:
+                    best_ns_seats = ns_seats
+                    best_ns_date = d
+
+            if nonstop_only and ns_seats == 0:
+                continue
+
+            # Find best nonstop flight number
+            best_fn = "-"
+            if ns_flights:
+                best_f = max(ns_flights, key=lambda f: f.seats)
+                best_fn = best_f.flight_number or f"{carrier}?"
+
+            results.append((d, total_seats, ns_seats, ns_count, conn_count, best_fn))
+
+        except typer.Exit:
+            raise
+        except Exception as exc:
+            if "login" in str(exc).lower() or "session" in str(exc).lower():
+                _error_panel(f"ExpertFlyer session error: {exc}")
+                raise typer.Exit(code=2)
+            results.append((d, -1, 0, 0, 0, f"ERR"))
+
+    scraper.close()
+
+    # Display results
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(title=f"{origin}-{dest} {carrier} {booking_class}-class Date Scan")
+        table.add_column("Date", style="cyan")
+        table.add_column("Day", style="dim")
+        table.add_column(f"{booking_class} Total", justify="right")
+        table.add_column("Nonstop", justify="right")
+        table.add_column("Conn", justify="right", style="dim")
+        table.add_column("Best Flight")
+
+        for d, total, ns, ns_cnt, conn, fn in results:
+            if total < 0:
+                table.add_row(d.isoformat(), d.strftime("%a"), "[red]ERR[/]", "-", "-", fn)
+            elif ns > 0:
+                table.add_row(
+                    d.isoformat(), d.strftime("%a"),
+                    f"{booking_class}{total}", f"[bold green]{booking_class}{ns}[/] ({ns_cnt})",
+                    str(conn), f"[green]{fn}[/]",
+                )
+            else:
+                table.add_row(
+                    d.isoformat(), d.strftime("%a"),
+                    f"{booking_class}{total}", f"[dim]{booking_class}0[/]",
+                    str(conn), "[dim]-[/]",
+                )
+
+        console.print(table)
+
+    except ImportError:
+        for d, total, ns, ns_cnt, conn, fn in results:
+            marker = "NONSTOP" if ns > 0 else "conn" if total > 0 else "ERR" if total < 0 else "none"
+            typer.echo(f"  {d} ({d.strftime('%a')})  {booking_class}{total}  ns={ns}  {marker}  {fn}")
+
+    # Summary
+    total_checked = len(dates)
+    if nonstop_dates > 0:
+        typer.echo(f"\n{nonstop_dates}/{total_checked} dates have nonstop {booking_class}-class. Best: {best_ns_date} {booking_class}{best_ns_seats}")
+    else:
+        typer.echo(f"\n0/{total_checked} dates have nonstop {booking_class}-class.")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

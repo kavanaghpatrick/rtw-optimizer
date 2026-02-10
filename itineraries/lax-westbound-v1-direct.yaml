@@ -1,0 +1,40 @@
+ticket:
+  type: DONE4
+  cabin: business
+  origin: LAX
+  passengers: 1
+  departure: "2026-04-01"
+  plating_carrier: AA
+
+segments:
+  - from: LAX
+    to: HND
+    carrier: JL
+    flight: JL15
+    date: "2026-04-01"
+    type: stopover
+    notes: "Japan Airlines 787 nonstop 11h45m — D9 confirmed"
+
+  - from: HND
+    to: SYD
+    carrier: JL
+    flight: JL51
+    date: "2026-04-05"
+    type: stopover
+    notes: "Japan Airlines 787 nonstop 9h40m — D3 confirmed"
+
+  - from: SYD
+    to: DOH
+    carrier: QR
+    flight: QR909
+    date: "2026-04-09"
+    type: stopover
+    notes: "Qatar Airways 777 nonstop 14h50m — D9 confirmed"
+
+  - from: DOH
+    to: LAX
+    carrier: QR
+    flight: QR739
+    date: "2026-04-13"
+    type: final
+    notes: "Qatar Airways 777 nonstop — D9 confirmed. Skips Europe, direct home."
