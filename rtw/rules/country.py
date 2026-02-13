@@ -179,6 +179,18 @@ class OriginCountryReturnRule:
                 )
             ]
 
+        # Identify "start of journey": walk forward from first segment
+        # while segments stay within origin country (initial departure chain, exempt)
+        initial_departure_end = 0
+        for j in range(len(segments)):
+            seg = segments[j]
+            from_country = get_country(seg.from_airport)
+            to_country = get_country(seg.to_airport)
+            if from_country == origin_country and to_country == origin_country:
+                initial_departure_end = j + 1
+            else:
+                break
+
         # Identify "end of journey": walk backwards from last segment
         # while segments touch origin country, mark as final return (exempt)
         final_return_start = len(segments)
@@ -192,9 +204,10 @@ class OriginCountryReturnRule:
                 break
 
         # Check mid-journey segments for returns to origin country
+        # (skip initial departure chain and final return)
         mid_journey_returns = []
         transit_returns = 0  # US exception: transit through origin country
-        for i in range(final_return_start):
+        for i in range(initial_departure_end, final_return_start):
             seg = segments[i]
             if seg.is_surface:
                 continue
