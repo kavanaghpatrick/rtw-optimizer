@@ -1,0 +1,52 @@
+# Implicit Asia fixture: DONE3 with DOH-SYD crossing Asian airspace
+# LHR origin, DOH-SYD triggers implicit Asia detection
+# Expected: ImplicitAsiaRule INFO, ContinentCountRule WARNING (4 continents but DONE3)
+# Overall: PASS (WARNING severity, not VIOLATION)
+
+ticket:
+  type: DONE3
+  cabin: business
+  origin: LHR
+  passengers: 1
+  departure: "2026-07-01"
+
+segments:
+  # EU_ME internal
+  - from: LHR
+    to: DOH
+    carrier: QR
+    date: "2026-07-01"
+    type: transit
+    notes: "Qatar to Doha — transit"
+
+  # EU_ME -> SWP (triggers implicit Asia!)
+  - from: DOH
+    to: SYD
+    carrier: QR
+    date: "2026-07-01"
+    type: stopover
+    notes: "Qatar DOH-SYD — crosses Asian airspace"
+
+  # SWP internal
+  - from: SYD
+    to: MEL
+    carrier: QF
+    date: "2026-07-05"
+    type: transit
+    notes: "Qantas domestic"
+
+  # SWP -> N_America (TC3 -> TC1 — Pacific crossing)
+  - from: MEL
+    to: LAX
+    carrier: QF
+    date: "2026-07-06"
+    type: stopover
+    notes: "Qantas A380 — Pacific crossing"
+
+  # N_America -> EU_ME (TC1 -> TC2 — Atlantic crossing)
+  - from: LAX
+    to: LHR
+    carrier: BA
+    date: "2026-07-10"
+    type: final
+    notes: "BA Club World — Atlantic crossing, return to origin"

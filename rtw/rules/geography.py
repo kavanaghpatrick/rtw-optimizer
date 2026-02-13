@@ -2,7 +2,7 @@
 
 from rtw.continents import get_country
 from rtw.rules.base import register_rule
-from rtw.models import RuleResult, Severity
+from rtw.models import RuleResult, Severity, Continent
 
 # Hawaii airports
 _HAWAII_AIRPORTS = {"HNL", "OGG", "KOA", "LIH", "ITO"}
@@ -296,3 +296,45 @@ class TranscontinentalAURule:
             )
 
         return results
+
+
+@register_rule
+class ImplicitAsiaRule:
+    """Detects implicit Asia continent visit from EU_ME<->SWP direct flights."""
+
+    rule_id = "implicit_asia"
+    rule_name = "Implicit Continent: Asia"
+    rule_reference = "Rule 3015 SS16"
+
+    def check(self, itinerary, context) -> list[RuleResult]:
+        asia_segments = context.implicit_continent_segments.get(Continent.ASIA, [])
+
+        if not asia_segments:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=True,
+                    message="No implicit continent visits detected.",
+                )
+            ]
+
+        # Build flight descriptions
+        flights = []
+        for idx in asia_segments:
+            seg = itinerary.segments[idx]
+            flights.append(f"{seg.from_airport}-{seg.to_airport}")
+
+        return [
+            RuleResult(
+                rule_id=self.rule_id,
+                rule_name=self.rule_name,
+                rule_reference=self.rule_reference,
+                passed=True,
+                severity=Severity.INFO,
+                message=f"{len(asia_segments)} direct EU/ME\u2194SWP flight(s) ({', '.join(flights)}) "
+                f"cross Asian airspace. Asia counted as visited continent for pricing.",
+                segments_involved=asia_segments,
+            )
+        ]
