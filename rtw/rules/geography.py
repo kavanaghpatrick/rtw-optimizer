@@ -1,5 +1,6 @@
 """Geography-specific rules: Hawaii, Alaska, Australia, Transcontinental. Rule 3015 §9-10."""
 
+from rtw.continents import get_country
 from rtw.rules.base import register_rule
 from rtw.models import RuleResult, Severity
 
@@ -182,3 +183,116 @@ class TranscontinentalUSRule:
                 message=f"US transcontinental flights: {transcon_count}/1.",
             )
         ]
+
+
+# AU transcontinental airport groups
+_AU_EAST_PER = frozenset({"BNE", "CBR", "CNS", "SYD", "MEL"})
+_AU_PER = frozenset({"PER"})
+_AU_EAST_DRW = frozenset({"CBR", "MEL", "SYD"})
+_AU_DRW = frozenset({"DRW"})
+_AU_EAST_BME = frozenset({"BNE", "MEL", "SYD"})
+_AU_BME_KTA = frozenset({"BME", "KTA"})
+
+_AU_TRANSCON_GROUPS = [
+    (_AU_EAST_PER, _AU_PER, "east coast and Perth"),
+    (_AU_EAST_DRW, _AU_DRW, "east coast and Darwin"),
+    (_AU_EAST_BME, _AU_BME_KTA, "east coast and Broome/Karratha"),
+]
+
+
+@register_rule
+class TranscontinentalAURule:
+    """Only one transcontinental flight within Australia per pair group."""
+
+    rule_id = "transcontinental_au"
+    rule_name = "AU Transcontinental Limit"
+    rule_reference = "Rule 3015 SS9"
+
+    def check(self, itinerary, context) -> list[RuleResult]:
+        # PER-origin exemption: PER origin with JNB connection
+        if itinerary.ticket.origin == "PER":
+            if any(
+                s.from_airport == "JNB" or s.to_airport == "JNB"
+                for s in itinerary.segments
+            ):
+                return [
+                    RuleResult(
+                        rule_id=self.rule_id,
+                        rule_name=self.rule_name,
+                        rule_reference=self.rule_reference,
+                        passed=True,
+                        severity=Severity.INFO,
+                        message="Perth origin with JNB connection — AU transcontinental limit exempt.",
+                    )
+                ]
+
+        # NZ-origin exemption: NZ origin with JNB connection
+        origin_country = get_country(itinerary.ticket.origin)
+        if origin_country == "NZ":
+            if any(
+                s.from_airport == "JNB" or s.to_airport == "JNB"
+                for s in itinerary.segments
+            ):
+                return [
+                    RuleResult(
+                        rule_id=self.rule_id,
+                        rule_name=self.rule_name,
+                        rule_reference=self.rule_reference,
+                        passed=True,
+                        severity=Severity.INFO,
+                        message="NZ origin with JNB connection — AU transcontinental limit exempt.",
+                    )
+                ]
+
+        results: list[RuleResult] = []
+
+        for set_a, set_b, label in _AU_TRANSCON_GROUPS:
+            matching_indices: list[int] = []
+            for i, seg in enumerate(itinerary.segments):
+                if seg.is_surface:
+                    continue
+                if (seg.from_airport in set_a and seg.to_airport in set_b) or (
+                    seg.from_airport in set_b and seg.to_airport in set_a
+                ):
+                    matching_indices.append(i)
+
+            count = len(matching_indices)
+
+            if count >= 2:
+                results.append(
+                    RuleResult(
+                        rule_id=self.rule_id,
+                        rule_name=self.rule_name,
+                        rule_reference=self.rule_reference,
+                        passed=False,
+                        severity=Severity.VIOLATION,
+                        message=f"{count} AU transcontinental flights between {label} — only 1 permitted.",
+                        fix_suggestion=f"Remove extra {label} segments or route via an intermediate city.",
+                        segments_involved=matching_indices,
+                    )
+                )
+            elif count == 1:
+                results.append(
+                    RuleResult(
+                        rule_id=self.rule_id,
+                        rule_name=self.rule_name,
+                        rule_reference=self.rule_reference,
+                        passed=True,
+                        severity=Severity.INFO,
+                        message=f"1 AU transcontinental flight between {label} (within limit).",
+                    )
+                )
+            # count == 0: skip
+
+        if not results:
+            results.append(
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=True,
+                    message="No AU transcontinental flights detected.",
+                )
+            )
+
+        return results
