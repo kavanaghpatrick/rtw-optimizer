@@ -1,0 +1,70 @@
+# AU transcon + open jaw fixture: SYD origin, open jaw to MEL
+# 8 segments covering 4 continents (SWP, Asia, N_America, EU_ME)
+# Westbound direction, both ocean crossings
+# SYD-PER transcon segment (single = INFO, not violation)
+# Open jaw: SYD origin -> MEL destination (both AU = permitted)
+# Expected: TranscontinentalAURule INFO, OpenJawPairsRule PASS, ReturnToOriginRule PASS
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: SYD
+  passengers: 1
+  departure: "2026-05-01"
+
+segments:
+  # SWP internal (AU transcon)
+  - from: SYD
+    to: PER
+    carrier: QF
+    date: "2026-05-01"
+    type: stopover
+    notes: "Qantas domestic — transcontinental"
+
+  # SWP -> EU_ME (TC3 -> TC2)
+  - from: PER
+    to: DOH
+    carrier: QR
+    date: "2026-05-04"
+    type: transit
+    notes: "Qatar to Doha"
+
+  # EU_ME internal
+  - from: DOH
+    to: LHR
+    carrier: BA
+    date: "2026-05-04"
+    type: stopover
+    notes: "BA to London"
+
+  # EU_ME -> N_America (TC2 -> TC1 — Atlantic crossing)
+  - from: LHR
+    to: JFK
+    carrier: BA
+    date: "2026-05-08"
+    type: stopover
+    notes: "BA Club World — Atlantic crossing"
+
+  # N_America internal
+  - from: JFK
+    to: LAX
+    carrier: AA
+    date: "2026-05-12"
+    type: stopover
+    notes: "AA transcontinental"
+
+  # N_America -> SWP (TC1 -> TC3 — Pacific crossing)
+  - from: LAX
+    to: SYD
+    carrier: QF
+    date: "2026-05-16"
+    type: transit
+    notes: "Qantas A380 — Pacific crossing"
+
+  # SWP internal
+  - from: SYD
+    to: MEL
+    carrier: QF
+    date: "2026-05-17"
+    type: final
+    notes: "Qantas domestic — open jaw to MEL"

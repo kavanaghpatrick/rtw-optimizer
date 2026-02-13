@@ -58,7 +58,7 @@ class TestReturnToOrigin:
     def test_non_return_fails(self):
         segs = [
             {"from": "CAI", "to": "AMM", "carrier": "RJ"},
-            {"from": "AMM", "to": "DOH", "carrier": "QR"},
+            {"from": "AMM", "to": "CDG", "carrier": "BA"},
         ]
         itin = _make_itinerary(segs)
         ctx = build_context(itin)

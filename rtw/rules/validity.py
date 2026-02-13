@@ -2,7 +2,7 @@
 
 from rtw.rules.base import register_rule
 from rtw.models import RuleResult, Severity
-from rtw.continents import are_same_city
+from rtw.continents import are_same_city, check_open_jaw_permitted
 
 
 @register_rule
@@ -37,6 +37,18 @@ class ReturnToOriginRule:
                     message=f"Returns to origin: {last_dest} (same city as {origin}).",
                 )
             ]
+        # Check if this is a permitted open jaw
+        result = check_open_jaw_permitted(origin, last_dest)
+        if result.permitted:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=True,
+                    message=f"Open jaw {origin}→{last_dest}: permitted ({result.reason}).",
+                )
+            ]
         return [
             RuleResult(
                 rule_id=self.rule_id,
@@ -45,7 +57,67 @@ class ReturnToOriginRule:
                 passed=False,
                 severity=Severity.VIOLATION,
                 message=f"Last destination {last_dest} does not match origin {origin}.",
-                fix_suggestion=f"Add a final segment returning to {origin}.",
+                fix_suggestion=f"Add a final segment returning to {origin}. Permitted open-jaw pairs: same country, US↔CA, HK↔CN, MY↔SG, MV↔LK/IN, within Middle East, within Africa.",
+            )
+        ]
+
+
+@register_rule
+class OpenJawPairsRule:
+    """Open-jaw pairs must be permitted per Rule 3015 §18."""
+
+    rule_id = "open_jaw_pairs"
+    rule_name = "Open-Jaw Permitted Pairs"
+    rule_reference = "Rule 3015 SS18"
+
+    def check(self, itinerary, context) -> list[RuleResult]:
+        origin = itinerary.ticket.origin
+        if not itinerary.segments:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=True,
+                    message="No segments to check.",
+                )
+            ]
+        last_dest = itinerary.segments[-1].to_airport
+
+        # If returns to origin (same city), not an open jaw
+        if are_same_city(origin, last_dest):
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=True,
+                    message="Returns to origin — not an open jaw.",
+                )
+            ]
+
+        # Check if open jaw is permitted
+        result = check_open_jaw_permitted(origin, last_dest)
+        if result.permitted:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=True,
+                    message=f"Open jaw {origin}→{last_dest}: permitted ({result.reason}).",
+                )
+            ]
+
+        return [
+            RuleResult(
+                rule_id=self.rule_id,
+                rule_name=self.rule_name,
+                rule_reference=self.rule_reference,
+                passed=False,
+                severity=Severity.VIOLATION,
+                message=f"Open jaw {origin}→{last_dest}: not permitted. {result.reason}.",
+                fix_suggestion="Permitted open-jaw pairs: same country, US↔CA, HK↔CN, MY↔SG, MV↔LK/IN, within Middle East, within Africa.",
             )
         ]
 
