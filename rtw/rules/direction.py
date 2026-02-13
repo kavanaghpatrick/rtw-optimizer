@@ -2,7 +2,7 @@
 
 from rtw.rules.base import register_rule
 from rtw.models import RuleResult, Severity, TariffConference, CONTINENT_TO_TC
-from rtw.continents import get_continent
+from rtw.continents import get_continent, get_same_city_group
 
 
 @register_rule
@@ -207,6 +207,84 @@ class OceanCrossingRule:
                     rule_reference=self.rule_reference,
                     passed=True,
                     message="Atlantic crossing: 1 (OK).",
+                )
+            )
+
+        return results
+
+
+@register_rule
+class CityPairDirectionRule:
+    """Same city-pair in same direction must not be flown more than once."""
+
+    rule_id = "city_pair_direction"
+    rule_name = "City-Pair Direction"
+    rule_reference = "Rule 3015 SS8"
+
+    def check(self, itinerary, context) -> list[RuleResult]:
+        seen: dict[tuple[str, str], list[int]] = {}
+
+        for i, seg in enumerate(itinerary.segments):
+            if seg.is_surface:
+                continue
+
+            from_group = get_same_city_group(seg.from_airport) or seg.from_airport
+            to_group = get_same_city_group(seg.to_airport) or seg.to_airport
+
+            if from_group == to_group:
+                continue
+
+            pair = (from_group, to_group)
+            if pair not in seen:
+                seen[pair] = []
+            seen[pair].append(i)
+
+        results: list[RuleResult] = []
+
+        for pair, indices in seen.items():
+            if len(indices) <= 1:
+                continue
+
+            # Get airport codes from the first occurrence for the message
+            first_seg = itinerary.segments[indices[0]]
+            from_code = first_seg.from_airport
+            to_code = first_seg.to_airport
+
+            seg_nums = ", ".join(str(idx + 1) for idx in indices)
+            message = (
+                f"Duplicate city-pair: {from_code}\u2192{to_code} "
+                f"flown {len(indices)} times (segments {seg_nums})."
+            )
+
+            # Note same-city resolution if applicable
+            from_group, to_group = pair
+            if from_group != from_code or to_group != to_code:
+                message += (
+                    f" {from_code}\u2192{to_code} resolved as "
+                    f"{from_group}\u2192{to_group} (same city group)."
+                )
+
+            results.append(
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=False,
+                    severity=Severity.VIOLATION,
+                    message=message,
+                    fix_suggestion="Remove the duplicate segment or use different city pairs.",
+                    segments_involved=indices,
+                )
+            )
+
+        if not results:
+            results.append(
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=True,
+                    message="No duplicate city-pair directions detected.",
                 )
             )
 
