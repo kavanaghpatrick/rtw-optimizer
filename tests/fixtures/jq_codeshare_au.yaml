@@ -1,0 +1,54 @@
+# JQ codeshare fixture: QF-marketed JQ-operated domestic AU flight
+# DONE4 ticket, SYD origin, SYD-MEL on QF with operating_carrier JQ
+# Plating carrier: BA (not restricted)
+# Expected: QFJQCodeshareRule PASS, EligibleCarrierRule PASS (QF is eligible)
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: SYD
+  passengers: 1
+  departure: "2026-06-01"
+  plating_carrier: BA
+
+segments:
+  # SWP -> Asia (TC3 -> TC3)
+  - from: SYD
+    to: MEL
+    carrier: QF
+    operating_carrier: JQ
+    date: "2026-06-01"
+    type: transit
+    notes: "QF-marketed, JQ-operated domestic"
+
+  # SWP -> EU_ME (TC3 -> TC2)
+  - from: MEL
+    to: DOH
+    carrier: QR
+    date: "2026-06-01"
+    type: transit
+    notes: "Qatar to Doha"
+
+  # EU_ME internal
+  - from: DOH
+    to: LHR
+    carrier: BA
+    date: "2026-06-02"
+    type: stopover
+    notes: "BA to London"
+
+  # EU_ME -> N_America (TC2 -> TC1 — Atlantic crossing)
+  - from: LHR
+    to: JFK
+    carrier: BA
+    date: "2026-06-06"
+    type: stopover
+    notes: "BA Club World"
+
+  # N_America -> SWP (TC1 -> TC3 — Pacific crossing)
+  - from: JFK
+    to: SYD
+    carrier: QF
+    date: "2026-06-10"
+    type: final
+    notes: "Qantas — Pacific crossing, return to origin"
