@@ -12,7 +12,7 @@ ticket:
   plating_carrier: BA
 
 segments:
-  # SWP -> Asia (TC3 -> TC3)
+  # SWP internal (QF-marketed, JQ-operated domestic)
   - from: SYD
     to: MEL
     carrier: QF
@@ -24,16 +24,16 @@ segments:
   # SWP -> EU_ME (TC3 -> TC2)
   - from: MEL
     to: DOH
-    carrier: QR
-    date: "2026-06-01"
+    carrier: QF
+    date: "2026-06-02"
     type: transit
-    notes: "Qatar to Doha"
+    notes: "Qantas to Doha (QF first carrier to avoid QR-first rule)"
 
   # EU_ME internal
   - from: DOH
     to: LHR
     carrier: BA
-    date: "2026-06-02"
+    date: "2026-06-03"
     type: stopover
     notes: "BA to London"
 
@@ -41,7 +41,7 @@ segments:
   - from: LHR
     to: JFK
     carrier: BA
-    date: "2026-06-06"
+    date: "2026-06-08"
     type: stopover
     notes: "BA Club World"
 
@@ -49,6 +49,6 @@ segments:
   - from: JFK
     to: SYD
     carrier: QF
-    date: "2026-06-10"
+    date: "2026-06-15"
     type: final
     notes: "Qantas — Pacific crossing, return to origin"

@@ -14,16 +14,16 @@ segments:
   # EU_ME internal
   - from: LHR
     to: DOH
-    carrier: QR
+    carrier: BA
     date: "2026-07-01"
     type: transit
-    notes: "Qatar to Doha — transit"
+    notes: "BA to Doha — transit (BA first to avoid QR-first rule)"
 
   # EU_ME -> SWP (triggers implicit Asia!)
   - from: DOH
     to: SYD
     carrier: QR
-    date: "2026-07-01"
+    date: "2026-07-02"
     type: stopover
     notes: "Qatar DOH-SYD — crosses Asian airspace"
 
@@ -31,7 +31,7 @@ segments:
   - from: SYD
     to: MEL
     carrier: QF
-    date: "2026-07-05"
+    date: "2026-07-08"
     type: transit
     notes: "Qantas domestic"
 
@@ -39,7 +39,7 @@ segments:
   - from: MEL
     to: LAX
     carrier: QF
-    date: "2026-07-06"
+    date: "2026-07-09"
     type: stopover
     notes: "Qantas A380 — Pacific crossing"
 
@@ -47,6 +47,6 @@ segments:
   - from: LAX
     to: LHR
     carrier: BA
-    date: "2026-07-10"
+    date: "2026-07-15"
     type: final
     notes: "BA Club World — Atlantic crossing, return to origin"
