@@ -6,6 +6,59 @@ from rtw.continents import get_continent
 
 
 @register_rule
+class FirstSegmentNotSurfaceRule:
+    """First segment of the itinerary must be a flown segment, not surface."""
+
+    rule_id = "first_segment_not_surface"
+    rule_name = "First Segment Not Surface"
+    rule_reference = "Rule 3015 §7"
+
+    def check(self, itinerary, context) -> list[RuleResult]:
+        if not itinerary.segments:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=True,
+                    message="No segments to check.",
+                )
+            ]
+
+        first = itinerary.segments[0]
+        if first.is_surface:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=False,
+                    severity=Severity.VIOLATION,
+                    message=(
+                        f"First segment {first.from_airport}->{first.to_airport} "
+                        f"is a surface sector. The first segment must be a flown segment."
+                    ),
+                    fix_suggestion=(
+                        "Replace the opening surface sector with a flown segment "
+                        "on a oneworld carrier. The ticket origin is defined by "
+                        "the departure point of the first flight."
+                    ),
+                    segments_involved=[0],
+                )
+            ]
+
+        return [
+            RuleResult(
+                rule_id=self.rule_id,
+                rule_name=self.rule_name,
+                rule_reference=self.rule_reference,
+                passed=True,
+                message="First segment is a flown segment.",
+            )
+        ]
+
+
+@register_rule
 class SameCityResolutionRule:
     """Same-city airport pairs (NRT/HND, TSA/TPE) are NOT surface sectors."""
 

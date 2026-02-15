@@ -2,6 +2,7 @@
 
 from rtw.rules.base import register_rule
 from rtw.models import RuleResult, Severity, Continent
+from rtw.continents import get_continent, get_country
 
 # Hemisphere classification per Rule 3015 Section 11 / Section 3.
 # Each Tariff Conference has one northern and one southern continent:
@@ -161,3 +162,93 @@ class HemisphereRevisitRule:
         has_swp = Continent.SWP in transitions
         has_eu_me = Continent.EU_ME in transitions
         return has_swp and has_eu_me
+
+
+@register_rule
+class EuMeAfricaZoneRule:
+    """EU/ME-Africa zone restriction: SA and Mauritius excluded when both IC flights are Africa↔EU/ME.
+
+    Rule 3015 SS11: If both intercontinental flights are between Africa and the
+    Europe Zone, then South Africa and Mauritius cannot be included.
+    """
+
+    rule_id = "eu_me_africa_zone"
+    rule_name = "EU/ME-Africa Zone Restriction"
+    rule_reference = "Rule 3015 SS11"
+
+    # Countries excluded when restriction applies
+    _EXCLUDED_COUNTRIES = frozenset({"ZA", "MU"})
+
+    def check(self, itinerary, context) -> list[RuleResult]:
+        # Find all intercontinental segments touching Africa or EU_ME
+        africa_ic_segments = []
+        non_africa_eu_me_ic = False
+
+        for i, seg in enumerate(itinerary.segments):
+            from_cont = get_continent(seg.from_airport)
+            to_cont = get_continent(seg.to_airport)
+            if not from_cont or not to_cont or from_cont == to_cont:
+                continue
+
+            # This is an intercontinental segment
+            # Check if it involves Africa
+            if Continent.AFRICA in (from_cont, to_cont):
+                other = to_cont if from_cont == Continent.AFRICA else from_cont
+                if other == Continent.EU_ME:
+                    africa_ic_segments.append(i)
+                else:
+                    # Africa connects to something other than EU/ME
+                    non_africa_eu_me_ic = True
+
+        # Rule only applies if ALL intercontinental flights touching Africa go to/from EU_ME
+        if not africa_ic_segments or non_africa_eu_me_ic:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=True,
+                    message="EU/ME-Africa zone restriction does not apply.",
+                )
+            ]
+
+        # Check for excluded countries (ZA, MU) in any segment
+        excluded_segments = []
+        for i, seg in enumerate(itinerary.segments):
+            for airport in (seg.from_airport, seg.to_airport):
+                country = get_country(airport)
+                if country in self._EXCLUDED_COUNTRIES:
+                    excluded_segments.append((i, airport, country))
+
+        if excluded_segments:
+            airports = ", ".join(
+                f"{apt} ({'South Africa' if cc == 'ZA' else 'Mauritius'})"
+                for _, apt, cc in excluded_segments
+            )
+            seg_nums = ", ".join(str(idx + 1) for idx, _, _ in excluded_segments)
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=False,
+                    severity=Severity.VIOLATION,
+                    message=(
+                        f"Both intercontinental flights to/from Africa are via EU/ME zone. "
+                        f"South Africa and Mauritius cannot be included. "
+                        f"Affected airports: {airports} (segments {seg_nums})."
+                    ),
+                    fix_suggestion="Route Africa via a non-EU/ME continent or remove South Africa/Mauritius stops.",
+                    segments_involved=[idx for idx, _, _ in excluded_segments],
+                )
+            ]
+
+        return [
+            RuleResult(
+                rule_id=self.rule_id,
+                rule_name=self.rule_name,
+                rule_reference=self.rule_reference,
+                passed=True,
+                message="EU/ME-Africa zone: no excluded airports found.",
+            )
+        ]

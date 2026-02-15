@@ -10,7 +10,7 @@ oneworld Explorer round-the-world ticket optimizer. Validates itineraries agains
 | CLI | Typer + Rich |
 | Models | Pydantic v2 |
 | Package mgr | uv (use `uv run`, `uv sync`) |
-| Tests | pytest (1080+ tests) |
+| Tests | pytest (1180+ tests) |
 | Lint | ruff |
 | Scraping | Playwright + httpx |
 
@@ -57,7 +57,7 @@ python3 -m rtw verify                  # Verify D-class availability (needs Expe
 | CLI | `rtw/cli.py` | All Typer commands and display logic |
 | Models | `rtw/models.py` | Itinerary, Segment, Ticket, CabinClass, TicketType |
 | Validator | `rtw/validator.py` | Rule 3015 orchestrator — builds ValidationContext, runs rules |
-| Rules | `rtw/rules/` | 24 rules across 10 files (segments, carriers, direction, geography, country, surface, validity, etc.) |
+| Rules | `rtw/rules/` | 31 rules across 10 files (segments, carriers, direction, geography, country, surface, validity, stopovers, hemisphere, intercontinental) |
 | Airports | `rtw/airports.py` | Shared airportsdata loader (fail-fast, single import) |
 | Cost | `rtw/cost.py` | Fare lookup + YQ surcharge calculation + FareLookupError |
 | NTP | `rtw/ntp.py` | BA New Tier Points estimator |

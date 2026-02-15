@@ -1,8 +1,8 @@
-"""Segment count and per-continent limit rules. [C§2.5] Rule 3015 §4."""
+"""Segment count, per-continent limit, and connectivity rules. Rule 3015 §4."""
 
 from rtw.rules.base import register_rule
 from rtw.models import RuleResult, Severity
-from rtw.continents import get_segment_limit
+from rtw.continents import get_segment_limit, are_same_city
 
 
 @register_rule
@@ -89,3 +89,63 @@ class PerContinentLimitRule:
                     )
                 )
         return results
+
+
+@register_rule
+class SegmentConnectivityRule:
+    """Check that consecutive segments form a connected chain."""
+
+    rule_id = "segment_connectivity"
+    rule_name = "Segment Connectivity"
+    rule_reference = "Rule 3015 §4"
+
+    def check(self, itinerary, context) -> list[RuleResult]:
+        if len(itinerary.segments) < 2:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=True,
+                    message="Too few segments to check connectivity.",
+                )
+            ]
+
+        gaps = []
+        for i in range(len(itinerary.segments) - 1):
+            arr = itinerary.segments[i].to_airport
+            dep = itinerary.segments[i + 1].from_airport
+            if arr != dep and not are_same_city(arr, dep):
+                # Gap between segments — only flag if next segment is not a surface sector
+                if not itinerary.segments[i + 1].is_surface:
+                    gaps.append((i, i + 1, arr, dep))
+
+        if gaps:
+            results = []
+            for seg_a, seg_b, arr, dep in gaps:
+                results.append(
+                    RuleResult(
+                        rule_id=self.rule_id,
+                        rule_name=self.rule_name,
+                        rule_reference=self.rule_reference,
+                        passed=False,
+                        severity=Severity.WARNING,
+                        message=(
+                            f"Segment {seg_b + 1} departs {dep} but segment {seg_a + 1} "
+                            f"arrives {arr} — no connecting surface sector."
+                        ),
+                        fix_suggestion=f"Add a surface sector between {arr} and {dep}, or correct the airport code.",
+                        segments_involved=[seg_a, seg_b],
+                    )
+                )
+            return results
+
+        return [
+            RuleResult(
+                rule_id=self.rule_id,
+                rule_name=self.rule_name,
+                rule_reference=self.rule_reference,
+                passed=True,
+                message="All segments connected.",
+            )
+        ]

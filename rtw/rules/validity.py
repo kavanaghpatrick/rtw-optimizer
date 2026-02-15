@@ -224,3 +224,118 @@ class TicketValidityRule:
             )
 
         return results
+
+
+@register_rule
+class OriginMatchesFirstSegmentRule:
+    """Ticket origin must match first segment departure airport."""
+
+    rule_id = "origin_matches_first_segment"
+    rule_name = "Origin Matches First Segment"
+    rule_reference = "Rule 3015 §7"
+
+    def check(self, itinerary, context) -> list[RuleResult]:
+        if not itinerary.segments:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=True,
+                    message="No segments to check.",
+                )
+            ]
+
+        origin = itinerary.ticket.origin
+        first_dep = itinerary.segments[0].from_airport
+        if are_same_city(origin, first_dep):
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=True,
+                    message=f"Origin {origin} matches first segment departure {first_dep}.",
+                )
+            ]
+
+        return [
+            RuleResult(
+                rule_id=self.rule_id,
+                rule_name=self.rule_name,
+                rule_reference=self.rule_reference,
+                passed=False,
+                severity=Severity.WARNING,
+                message=(
+                    f"Ticket origin {origin} does not match first segment departure "
+                    f"{first_dep}. Origin-based rules may produce incorrect results."
+                ),
+                fix_suggestion=f"Change ticket origin to {first_dep} or update the first segment to depart from {origin}.",
+                segments_involved=[0],
+            )
+        ]
+
+
+@register_rule
+class DateSequenceRule:
+    """Segment dates must be in chronological order."""
+
+    rule_id = "date_sequence"
+    rule_name = "Date Sequence"
+    rule_reference = "Rule 3015 §4"
+
+    def check(self, itinerary, context) -> list[RuleResult]:
+        dated_segments = [
+            (i, s) for i, s in enumerate(itinerary.segments) if s.date is not None
+        ]
+
+        if len(dated_segments) < 2:
+            return [
+                RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=True,
+                    severity=Severity.INFO,
+                    message="Insufficient dates to check sequence.",
+                )
+            ]
+
+        violations = []
+        for j in range(len(dated_segments) - 1):
+            idx_a, seg_a = dated_segments[j]
+            idx_b, seg_b = dated_segments[j + 1]
+            if seg_b.date < seg_a.date:
+                violations.append(
+                    (idx_a, idx_b, seg_a.date, seg_b.date)
+                )
+
+        if violations:
+            results = []
+            for idx_a, idx_b, date_a, date_b in violations:
+                results.append(
+                    RuleResult(
+                        rule_id=self.rule_id,
+                        rule_name=self.rule_name,
+                        rule_reference=self.rule_reference,
+                        passed=False,
+                        severity=Severity.VIOLATION,
+                        message=(
+                            f"Segment {idx_b + 1} date {date_b} is before "
+                            f"segment {idx_a + 1} date {date_a}."
+                        ),
+                        fix_suggestion="Correct the segment dates to be in chronological order.",
+                        segments_involved=[idx_a, idx_b],
+                    )
+                )
+            return results
+
+        return [
+            RuleResult(
+                rule_id=self.rule_id,
+                rule_name=self.rule_name,
+                rule_reference=self.rule_reference,
+                passed=True,
+                message="All segment dates in chronological order.",
+            )
+        ]

@@ -1,7 +1,7 @@
 """Tests for segment and continent limit rules."""
 
 from rtw.models import Itinerary, Ticket, Segment, Severity
-from rtw.rules.segments import SegmentCountRule, PerContinentLimitRule
+from rtw.rules.segments import SegmentCountRule, PerContinentLimitRule, SegmentConnectivityRule
 from rtw.validator import build_context
 
 
@@ -80,3 +80,69 @@ class TestPerContinentLimit:
         results = PerContinentLimitRule().check(itin, ctx)
         na_results = [r for r in results if "N_America" in r.message]
         assert all(r.passed for r in na_results)
+
+
+class TestSegmentConnectivity:
+    def test_connected_chain_passes(self):
+        segs = [
+            {"from": "CAI", "to": "AMM", "carrier": "RJ"},
+            {"from": "AMM", "to": "DOH", "carrier": "QR"},
+            {"from": "DOH", "to": "CAI", "carrier": "QR"},
+        ]
+        itin = _make_itinerary(segs)
+        ctx = build_context(itin)
+        results = SegmentConnectivityRule().check(itin, ctx)
+        assert all(r.passed for r in results)
+        assert "All segments connected" in results[0].message
+
+    def test_gap_detected(self):
+        segs = [
+            {"from": "CAI", "to": "AMM", "carrier": "RJ"},
+            {"from": "DOH", "to": "CAI", "carrier": "QR"},
+        ]
+        itin = _make_itinerary(segs)
+        ctx = build_context(itin)
+        results = SegmentConnectivityRule().check(itin, ctx)
+        assert any(not r.passed for r in results)
+        assert any(r.severity == Severity.WARNING for r in results)
+
+    def test_same_city_group_ok(self):
+        # NRT and HND are both in the TYO same-city group
+        segs = [
+            {"from": "CAI", "to": "NRT", "carrier": "QR"},
+            {"from": "HND", "to": "SIN", "carrier": "JL"},
+            {"from": "SIN", "to": "CAI", "carrier": "QR"},
+        ]
+        itin = _make_itinerary(segs)
+        ctx = build_context(itin)
+        results = SegmentConnectivityRule().check(itin, ctx)
+        assert all(r.passed for r in results)
+        assert "All segments connected" in results[0].message
+
+    def test_surface_sector_exempts_gap(self):
+        # Gap before a surface sector should not be flagged
+        segs = [
+            {"from": "CAI", "to": "AMM", "carrier": "RJ"},
+            {"from": "DOH", "to": "NRT", "carrier": "QR", "type": "surface"},
+            {"from": "NRT", "to": "CAI", "carrier": "JL"},
+        ]
+        itin = _make_itinerary(segs)
+        ctx = build_context(itin)
+        results = SegmentConnectivityRule().check(itin, ctx)
+        assert all(r.passed for r in results)
+
+    def test_single_segment_passes(self):
+        segs = [
+            {"from": "CAI", "to": "AMM", "carrier": "RJ"},
+        ]
+        itin = _make_itinerary(segs)
+        ctx = build_context(itin)
+        results = SegmentConnectivityRule().check(itin, ctx)
+        assert all(r.passed for r in results)
+        assert "Too few segments" in results[0].message
+
+    def test_v3_passes(self, v3_itinerary):
+        itin = Itinerary(**v3_itinerary)
+        ctx = build_context(itin)
+        results = SegmentConnectivityRule().check(itin, ctx)
+        assert all(r.passed for r in results)
