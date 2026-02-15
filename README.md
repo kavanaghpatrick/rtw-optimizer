@@ -6,7 +6,7 @@ A CLI tool for optimizing [oneworld Explorer](https://www.oneworld.com/flights/r
 
 oneworld Explorer fares let you fly around the world on oneworld airlines for a flat fare based on continents visited. A business class ticket visiting 4 continents starts at ~$4,000 from Cairo or ~$10,500 from New York.
 
-The catch: these tickets are governed by [IATA Rule 3015](docs/01-fare-rules.md) -- 24 rules around direction of travel, continent crossings, backtracking, carrier requirements, segment limits, and more. Building a valid itinerary by hand means juggling all of these while checking seat availability across a dozen airlines. This tool automates all of that.
+The catch: these tickets are governed by [IATA Rule 3015](01-fare-rules.md) -- 24 rules around direction of travel, continent crossings, backtracking, carrier requirements, segment limits, and more. Building a valid itinerary by hand means juggling all of these while checking seat availability across a dozen airlines. This tool automates all of that.
 
 ## Quick Start
 
@@ -135,7 +135,7 @@ uv run pytest tests/test_cost.py -x    # Single file, stop on failure
 ruff check rtw/ tests/                 # Lint
 ```
 
-The validator runs 24 rules across 10 modules in `rtw/rules/`. Each rule returns `RuleResult` with severity (PASS/WARNING/VIOLATION/INFO). See [docs/01-fare-rules.md](docs/01-fare-rules.md) for the authoritative rule reference and `CLAUDE.md` for the full module map and project conventions.
+The validator runs 24 rules across 10 modules in `rtw/rules/`. Each rule returns `RuleResult` with severity (PASS/WARNING/VIOLATION/INFO). See [01-fare-rules.md](01-fare-rules.md) for the authoritative rule reference and `CLAUDE.md` for the full module map and project conventions.
 
 ## License
 
