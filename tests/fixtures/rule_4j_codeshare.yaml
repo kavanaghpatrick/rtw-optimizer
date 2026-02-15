@@ -1,0 +1,58 @@
+# Rule §4(j): Codeshare validation — FAIL + WARNING case
+# JQ (Jetstar) as operating_carrier with QF marketing -> recognized as QF codeshare (INFO)
+# IB as plating_carrier + JQ present -> QFJQCodeshare WARNING (IB stock restricts JQ)
+# S7 carrier -> EligibleCarrier VIOLATION (sanctions, ineligible)
+# Tests: EligibleCarrierRule, QFJQCodeshareRule
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: SYD
+  passengers: 1
+  departure: "2026-06-01"
+  plating_carrier: IB
+
+segments:
+  # JQ codeshare: QF-marketed, JQ-operated -> codeshare recognized
+  - from: SYD
+    to: MEL
+    carrier: QF
+    operating_carrier: JQ
+    date: "2026-06-01"
+    type: transit
+    notes: "QF-marketed, JQ-operated -> codeshare INFO + IB plating WARNING"
+
+  # SWP -> EU_ME
+  - from: MEL
+    to: DOH
+    carrier: QR
+    date: "2026-06-02"
+    type: transit
+
+  - from: DOH
+    to: LHR
+    carrier: BA
+    date: "2026-06-03"
+    type: stopover
+
+  # Atlantic crossing (westbound)
+  - from: LHR
+    to: JFK
+    carrier: BA
+    date: "2026-06-07"
+    type: stopover
+
+  # S7 = INELIGIBLE carrier (Russian, sanctioned)
+  - from: JFK
+    to: NRT
+    carrier: S7
+    date: "2026-06-11"
+    type: stopover
+    notes: "S7 = ineligible oneworld carrier -> VIOLATION"
+
+  # Return to origin
+  - from: NRT
+    to: SYD
+    carrier: QF
+    date: "2026-06-15"
+    type: final

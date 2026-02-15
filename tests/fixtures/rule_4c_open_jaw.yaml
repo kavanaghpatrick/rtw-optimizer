@@ -1,0 +1,46 @@
+# Rule §4(c): Open-jaw validation — FAIL case
+# Open jaw LHR→CDG: GB→FR = different countries, no bilateral pair
+# Tests: ReturnToOriginRule VIOLATION, OpenJawPairsRule VIOLATION
+# Permitted pairs: same country, US-CA, HK-CN, MY-SG, MV-LK/IN, Middle East, Africa
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: LHR
+  passengers: 1
+  departure: "2026-06-01"
+
+segments:
+  # Atlantic crossing (westbound)
+  - from: LHR
+    to: JFK
+    carrier: BA
+    date: "2026-06-01"
+    type: stopover
+
+  # Pacific crossing (westbound)
+  - from: JFK
+    to: NRT
+    carrier: JL
+    date: "2026-06-05"
+    type: stopover
+
+  - from: NRT
+    to: SYD
+    carrier: QF
+    date: "2026-06-09"
+    type: stopover
+
+  - from: SYD
+    to: DOH
+    carrier: QR
+    date: "2026-06-13"
+    type: transit
+
+  # Ends at CDG, NOT LHR -> unpermitted open jaw (GB != FR)
+  - from: DOH
+    to: CDG
+    carrier: BA
+    date: "2026-06-14"
+    type: final
+    notes: "Open jaw LHR->CDG: GB!=FR, no bilateral -> VIOLATION"

@@ -1,0 +1,68 @@
+# Challenge 6: "Transoceanic Surface + SWP Exemption"
+# Tests: TransoceanicSurfaceRule (SWP exception), direction, ocean crossings
+# SYD origin, DONE4
+# AKL->LAX surface: TC3->TC1 = transoceanic #1, SWP origin -> 1 allowed (WARNING)
+# JFK->LHR surface: TC1->TC2 = transoceanic #2 -> VIOLATION
+# IST->BKK surface: TC2->TC3 = NOT restricted (allowed)
+# NOTE: Flown segments are all TC-internal, so OceanCrossing rule will fail too (no flown crossings)
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: SYD
+  passengers: 1
+  departure: "2026-11-01"
+
+segments:
+  # SWP internal (flown)
+  - from: SYD
+    to: AKL
+    carrier: QF
+    date: "2026-11-01"
+    type: stopover
+    notes: "SWP internal"
+
+  # Surface: SWP -> N_America (TC3->TC1, transoceanic!)
+  - from: AKL
+    to: LAX
+    date: "2026-11-05"
+    type: surface
+    notes: "SURFACE TC3->TC1 transoceanic #1 (SWP exempt = WARNING)"
+
+  # N_America internal (flown)
+  - from: LAX
+    to: JFK
+    carrier: AA
+    date: "2026-11-08"
+    type: stopover
+    notes: "N_America internal"
+
+  # Surface: N_America -> EU_ME (TC1->TC2, transoceanic!)
+  - from: JFK
+    to: LHR
+    date: "2026-11-12"
+    type: surface
+    notes: "SURFACE TC1->TC2 transoceanic #2 -> VIOLATION"
+
+  # EU_ME internal (flown)
+  - from: LHR
+    to: IST
+    carrier: BA
+    date: "2026-11-15"
+    type: stopover
+    notes: "EU_ME internal"
+
+  # Surface: EU_ME -> Asia (TC2->TC3, NOT restricted)
+  - from: IST
+    to: BKK
+    date: "2026-11-18"
+    type: surface
+    notes: "SURFACE TC2->TC3 (allowed, not transoceanic)"
+
+  # Asia -> SWP (flown, return to origin)
+  - from: BKK
+    to: SYD
+    carrier: QF
+    date: "2026-11-21"
+    type: final
+    notes: "Asia->SWP return to origin"

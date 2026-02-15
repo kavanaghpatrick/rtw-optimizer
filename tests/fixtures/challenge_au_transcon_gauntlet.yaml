@@ -1,0 +1,83 @@
+# Challenge 1: "The AU Transcon Gauntlet"
+# Tests: TranscontinentalAURule (multi-group), ImplicitAsiaRule, OpenJawPairsRule, OriginCountryReturnRule
+# SYD origin, DONE4, open jaw SYD->MEL (both AU = permitted)
+# AU transcon group 1 (east coast-Perth) hit TWICE -> VIOLATION
+# AU transcon group 2 (east coast-Darwin) hit once -> INFO
+# PER->DOH triggers implicit Asia (SWP->EU_ME)
+# All AU domestic segments are initial departure chain -> no country return violation
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: SYD
+  passengers: 1
+  departure: "2026-06-01"
+
+segments:
+  # AU domestic chain (initial departure, all within origin country)
+  - from: SYD
+    to: PER
+    carrier: QF
+    date: "2026-06-01"
+    type: stopover
+    notes: "AU transcon group 1 (east coast-Perth) count 1"
+
+  - from: PER
+    to: DRW
+    carrier: QF
+    date: "2026-06-04"
+    type: transit
+    notes: "PER-DRW is NOT a transcon pair (PER not in DRW east set)"
+
+  - from: DRW
+    to: MEL
+    carrier: QF
+    date: "2026-06-05"
+    type: transit
+    notes: "AU transcon group 2 (east coast-Darwin) count 1"
+
+  - from: MEL
+    to: PER
+    carrier: QF
+    date: "2026-06-06"
+    type: transit
+    notes: "AU transcon group 1 count 2 -> VIOLATION!"
+
+  # Leave Australia
+  - from: PER
+    to: DOH
+    carrier: QF
+    date: "2026-06-07"
+    type: transit
+    notes: "SWP->EU_ME triggers implicit Asia detection"
+
+  - from: DOH
+    to: LHR
+    carrier: BA
+    date: "2026-06-08"
+    type: stopover
+    notes: "EU_ME internal"
+
+  # Atlantic crossing (westbound)
+  - from: LHR
+    to: JFK
+    carrier: BA
+    date: "2026-06-12"
+    type: stopover
+    notes: "Atlantic crossing westbound TC2->TC1"
+
+  # Pacific crossing (westbound)
+  - from: JFK
+    to: NRT
+    carrier: JL
+    date: "2026-06-16"
+    type: stopover
+    notes: "Pacific crossing westbound TC1->TC3"
+
+  # Return to SWP with open jaw
+  - from: NRT
+    to: MEL
+    carrier: QF
+    date: "2026-06-20"
+    type: final
+    notes: "Open jaw SYD->MEL (both AU, permitted)"

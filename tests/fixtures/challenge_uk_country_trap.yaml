@@ -1,0 +1,77 @@
+# Challenge 5: "The UK Country Trap"
+# Tests: OriginCountryReturnRule (country-level detection), ReturnToOriginRule (same-city LHR/LGW=LON)
+# LHR origin, DONE4
+# HKG->MAN mid-journey: MAN is in UK (GB) = same country as LHR -> VIOLATION
+# CDG->LGW final: LGW and LHR are same-city group (LON) -> returns to origin, not open jaw
+# The backward walk for final-return exemption stops at DOH->CDG (no GB), so MAN is mid-journey
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: LHR
+  passengers: 1
+  departure: "2026-10-01"
+
+segments:
+  # Atlantic crossing (westbound)
+  - from: LHR
+    to: JFK
+    carrier: BA
+    date: "2026-10-01"
+    type: stopover
+    notes: "Atlantic crossing TC2->TC1"
+
+  - from: JFK
+    to: LAX
+    carrier: AA
+    date: "2026-10-05"
+    type: stopover
+    notes: "N_America internal"
+
+  # Pacific crossing (westbound)
+  - from: LAX
+    to: SYD
+    carrier: QF
+    date: "2026-10-08"
+    type: stopover
+    notes: "Pacific crossing TC1->TC3"
+
+  # SWP -> Asia
+  - from: SYD
+    to: HKG
+    carrier: CX
+    date: "2026-10-12"
+    type: stopover
+    notes: "SWP->Asia"
+
+  # Asia -> UK (mid-journey return to origin country!)
+  - from: HKG
+    to: MAN
+    carrier: CX
+    date: "2026-10-15"
+    type: stopover
+    notes: "Arrives MAN = UK = origin country mid-journey -> VIOLATION"
+
+  # Departs UK
+  - from: MAN
+    to: DOH
+    carrier: QR
+    date: "2026-10-18"
+    type: transit
+    notes: "Departs UK"
+
+  # EU_ME (no UK involvement - breaks backward walk)
+  - from: DOH
+    to: CDG
+    carrier: BA
+    date: "2026-10-19"
+    type: stopover
+    notes: "EU_ME internal (QA->FR, no UK)"
+
+  # Final: same-city as origin (LHR/LGW = LON group)
+  - from: CDG
+    to: LGW
+    carrier: BA
+    date: "2026-10-21"
+    type: final
+    notes: "LGW = same city as LHR (LON group) -> returns to origin"

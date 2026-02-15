@@ -1,0 +1,83 @@
+# Challenge 4: "JQ + S7 + Open Jaw Cocktail"
+# Tests: EligibleCarrierRule (JQ codeshare + S7 ineligible), QFJQCodeshareRule (IB plating),
+#        OpenJawPairsRule (Africa pair NBO->JNB), ImplicitAsiaRule
+# NBO origin, DONE4, plating_carrier=IB
+# JQ recognized as QF codeshare -> PASS+INFO
+# S7 = ineligible (sanctions) -> VIOLATION
+# IB plating + JQ present -> QFJQCodeshare WARNING
+# Open jaw NBO->JNB = both Africa -> permitted
+# MEL->DOH triggers implicit Asia (SWP->EU_ME)
+# Overall: FAIL (S7 violation)
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: NBO
+  passengers: 1
+  departure: "2026-09-01"
+  plating_carrier: IB
+
+segments:
+  # Africa -> EU_ME
+  - from: NBO
+    to: LHR
+    carrier: BA
+    date: "2026-09-01"
+    type: stopover
+    notes: "Africa->EU_ME"
+
+  # Atlantic crossing (westbound)
+  - from: LHR
+    to: JFK
+    carrier: BA
+    date: "2026-09-05"
+    type: stopover
+    notes: "Atlantic crossing TC2->TC1"
+
+  - from: JFK
+    to: LAX
+    carrier: AA
+    date: "2026-09-09"
+    type: stopover
+    notes: "N_America internal"
+
+  # Pacific crossing (westbound)
+  - from: LAX
+    to: SYD
+    carrier: QF
+    date: "2026-09-12"
+    type: stopover
+    notes: "Pacific crossing TC1->TC3"
+
+  # JQ codeshare segment
+  - from: SYD
+    to: MEL
+    carrier: QF
+    operating_carrier: JQ
+    date: "2026-09-14"
+    type: transit
+    notes: "QF-marketed, JQ-operated domestic (codeshare test)"
+
+  # SWP -> EU_ME (implicit Asia)
+  - from: MEL
+    to: DOH
+    carrier: QR
+    date: "2026-09-15"
+    type: transit
+    notes: "SWP->EU_ME triggers implicit Asia"
+
+  # S7 ineligible carrier!
+  - from: DOH
+    to: IST
+    carrier: S7
+    date: "2026-09-16"
+    type: stopover
+    notes: "S7 = INELIGIBLE carrier (sanctions) -> VIOLATION"
+
+  # Return to Africa (open jaw)
+  - from: IST
+    to: JNB
+    carrier: BA
+    date: "2026-09-20"
+    type: final
+    notes: "Open jaw NBO->JNB (both Africa, permitted)"

@@ -1,0 +1,56 @@
+# Rule §4(l): Australia transcontinental limit — FAIL case
+# SYD->PER (group 1 count 1) + PER->MEL (group 1 count 2) = VIOLATION
+# East coast-Perth pair group allows only 1 nonstop
+# PER-origin with JNB connection would be exempt, but SYD origin = no exemption
+# Tests: TranscontinentalAURule VIOLATION
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: SYD
+  passengers: 1
+  departure: "2026-06-01"
+
+segments:
+  # AU transcon group 1: east coast-Perth count 1
+  - from: SYD
+    to: PER
+    carrier: QF
+    date: "2026-06-01"
+    type: stopover
+    notes: "AU transcon east coast-Perth #1"
+
+  # AU transcon group 1: Perth-east coast count 2! -> VIOLATION
+  - from: PER
+    to: MEL
+    carrier: QF
+    date: "2026-06-04"
+    type: transit
+    notes: "AU transcon east coast-Perth #2 -> VIOLATION"
+
+  # Leave AU (SWP -> EU_ME, triggers implicit Asia)
+  - from: MEL
+    to: DOH
+    carrier: QR
+    date: "2026-06-05"
+    type: transit
+
+  - from: DOH
+    to: LHR
+    carrier: BA
+    date: "2026-06-06"
+    type: stopover
+
+  # Atlantic crossing (westbound)
+  - from: LHR
+    to: JFK
+    carrier: BA
+    date: "2026-06-10"
+    type: stopover
+
+  # Pacific crossing (westbound)
+  - from: JFK
+    to: SYD
+    carrier: QF
+    date: "2026-06-15"
+    type: final

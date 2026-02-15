@@ -1,0 +1,69 @@
+# Challenge 7: "The Maldives Edge Case"
+# Tests: OpenJawPairsRule (MV<->LK bilateral), OriginCountryIntlLimitRule (small island),
+#        NO implicit Asia (DOH->CMB is EU_ME->Asia, NOT EU_ME->SWP)
+# MLE origin, DONE4
+# Open jaw MLE->CMB = Maldives<->Sri Lanka bilateral pair -> PASS
+# Only 1 intl departure from Maldives -> within limit
+# DOH->CMB is EU_ME->Asia transition, NOT EU_ME->SWP, so no implicit Asia trigger
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: MLE
+  passengers: 1
+  departure: "2026-12-01"
+
+segments:
+  # Asia internal
+  - from: MLE
+    to: SIN
+    carrier: MH
+    date: "2026-12-01"
+    type: stopover
+    notes: "Maldives->Singapore (intl departure from MV)"
+
+  # Asia -> SWP
+  - from: SIN
+    to: SYD
+    carrier: QF
+    date: "2026-12-04"
+    type: stopover
+    notes: "Asia->SWP"
+
+  # Pacific crossing (eastbound)
+  - from: SYD
+    to: LAX
+    carrier: QF
+    date: "2026-12-08"
+    type: stopover
+    notes: "Pacific crossing TC3->TC1 eastbound"
+
+  - from: LAX
+    to: JFK
+    carrier: AA
+    date: "2026-12-11"
+    type: stopover
+    notes: "N_America internal"
+
+  # Atlantic crossing (eastbound)
+  - from: JFK
+    to: LHR
+    carrier: BA
+    date: "2026-12-14"
+    type: stopover
+    notes: "Atlantic crossing TC1->TC2 eastbound"
+
+  - from: LHR
+    to: DOH
+    carrier: QR
+    date: "2026-12-18"
+    type: transit
+    notes: "EU_ME internal"
+
+  # EU_ME -> Asia (NOT EU_ME->SWP, no implicit Asia!)
+  - from: DOH
+    to: CMB
+    carrier: QR
+    date: "2026-12-19"
+    type: final
+    notes: "Open jaw MLE->CMB = MV<->LK bilateral pair (permitted)"

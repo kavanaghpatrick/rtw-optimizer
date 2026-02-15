@@ -42,6 +42,10 @@ class ValidationContext:
     intercontinental_arrivals: dict[Continent, int] = field(default_factory=dict)
     # Intercontinental departures per continent (key = origin continent)
     intercontinental_departures: dict[Continent, int] = field(default_factory=dict)
+    # Implicit continent visits (e.g., Asia counted for EU_ME<->SWP direct flights)
+    implicit_continents: list[Continent] = field(default_factory=list)
+    # Segments that triggered implicit continent detection {continent: [seg_indices]}
+    implicit_continent_segments: dict[Continent, list[int]] = field(default_factory=dict)
 
 
 def build_context(itinerary: Itinerary) -> ValidationContext:
@@ -128,7 +132,46 @@ def build_context(itinerary: Itinerary) -> ValidationContext:
     ctx.intercontinental_arrivals = ic_arrivals
     ctx.intercontinental_departures = ic_departures
 
+    # Detect implicit continent visits (e.g., Asia for EU_ME<->SWP flights)
+    _detect_implicit_continents(ctx, itinerary)
+
     return ctx
+
+
+def _detect_implicit_continents(ctx: ValidationContext, itinerary: Itinerary) -> None:
+    """Detect implicit continent visits per Rule 3015 §16.
+
+    Direct flights between EU/ME and SWP are considered 'travelling via Asia'.
+    Asia must be counted as a visited continent for pricing.
+    """
+    from rtw.continents import get_continent
+
+    implicit_segments: dict[Continent, list[int]] = {}
+
+    for i, seg in enumerate(itinerary.segments):
+        if seg.is_surface:
+            continue
+        from_cont = get_continent(seg.from_airport)
+        to_cont = get_continent(seg.to_airport)
+
+        if not from_cont or not to_cont:
+            continue
+
+        # EU_ME <-> SWP implies travelling via Asia
+        if (from_cont == Continent.EU_ME and to_cont == Continent.SWP) or \
+           (from_cont == Continent.SWP and to_cont == Continent.EU_ME):
+            if Continent.ASIA not in implicit_segments:
+                implicit_segments[Continent.ASIA] = []
+            implicit_segments[Continent.ASIA].append(i)
+
+    # Update context
+    ctx.implicit_continent_segments = implicit_segments
+    ctx.implicit_continents = list(implicit_segments.keys())
+
+    # Add implicit continents to continents_visited if not already present
+    for continent in ctx.implicit_continents:
+        if continent not in ctx.continents_visited:
+            ctx.continents_visited.append(continent)
 
 
 class Validator:
@@ -149,6 +192,7 @@ class Validator:
         import rtw.rules.validity  # noqa: F401
         import rtw.rules.hemisphere  # noqa: F401
         import rtw.rules.intercontinental  # noqa: F401
+        import rtw.rules.country  # noqa: F401
 
     def validate(self, itinerary: Itinerary) -> ValidationReport:
         """Run all rules and return a validation report."""

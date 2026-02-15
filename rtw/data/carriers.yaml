@@ -161,6 +161,17 @@ S7:
   rtw_booking_class: D
   notes: "Russian carrier. Suspended from oneworld Explorer due to EU/US/UK sanctions on Russian aviation. Technically still a oneworld member but flights cannot be ticketed on RTW itineraries."
 
+JQ:
+  name: Jetstar Airways
+  alliance: oneworld
+  eligible: false
+  codeshare_parent: QF
+  ntp_method: null
+  yq_tier: null
+  yq_estimate_per_segment: null
+  rtw_booking_class: null
+  notes: "QF codeshare on Jetstar. QF-marketed JQ-operated flights permitted on oneworld Explorer. When JQ included, AS/IB ticket stock cannot be used."
+
 # Ineligible carriers (for reference)
 LA:
   name: LATAM Airlines

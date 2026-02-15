@@ -1,0 +1,65 @@
+# Rule §4(f): Country-of-origin international departure limit — FAIL case
+# LHR origin: 2 intl departures from UK (LHR->JFK + MAN->CDG) — limit is 1
+# Also: 2 intl arrivals into UK (DOH->MAN + CDG->LHR) — limit is 1
+# US exception (2 deps if 1 transit) does NOT apply to UK origin
+# Tests: OriginCountryIntlLimitRule VIOLATION (both departures and arrivals)
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: LHR
+  passengers: 1
+  departure: "2026-06-01"
+
+segments:
+  # Intl departure from UK #1
+  - from: LHR
+    to: JFK
+    carrier: BA
+    date: "2026-06-01"
+    type: stopover
+    notes: "Intl dep from UK #1 (Atlantic crossing)"
+
+  # Pacific crossing (westbound)
+  - from: JFK
+    to: NRT
+    carrier: JL
+    date: "2026-06-05"
+    type: stopover
+
+  - from: NRT
+    to: SYD
+    carrier: QF
+    date: "2026-06-09"
+    type: stopover
+
+  # SWP -> EU_ME (triggers implicit Asia)
+  - from: SYD
+    to: DOH
+    carrier: QR
+    date: "2026-06-13"
+    type: transit
+
+  # Intl arrival into UK #1 (part of final return chain)
+  - from: DOH
+    to: MAN
+    carrier: BA
+    date: "2026-06-14"
+    type: stopover
+    notes: "Intl arrival into UK #1 (MAN=GB)"
+
+  # Intl departure from UK #2! (part of final return chain)
+  - from: MAN
+    to: CDG
+    carrier: BA
+    date: "2026-06-17"
+    type: transit
+    notes: "Intl dep from UK #2 (MAN->CDG) -> exceeds limit of 1"
+
+  # Intl arrival into UK #2!
+  - from: CDG
+    to: LHR
+    carrier: BA
+    date: "2026-06-18"
+    type: final
+    notes: "Intl arrival into UK #2 -> exceeds limit of 1"

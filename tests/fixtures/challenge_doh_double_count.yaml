@@ -1,0 +1,55 @@
+# Challenge 3: "The DOH Double-Count Trap"
+# Tests: ImplicitAsiaRule (already visiting Asia), ContinentCountRule, same-city NRT/HND
+# CAI origin, DONE3
+# Explicit Asia visit via NRT, then SYD->DOH triggers implicit Asia
+# Asia should NOT be double-counted in continents_visited
+# NRT arrival / HND departure tests same-city group resolution (Tokyo)
+# NOTE: No ocean crossings in this routing (EU_ME->Asia->SWP->EU_ME) - OceanCrossing will fail
+
+ticket:
+  type: DONE3
+  cabin: business
+  origin: CAI
+  passengers: 1
+  departure: "2026-08-01"
+
+segments:
+  # EU_ME internal
+  - from: CAI
+    to: DOH
+    carrier: RJ
+    date: "2026-08-01"
+    type: transit
+    notes: "EU_ME internal (Egypt->Qatar)"
+
+  # EU_ME -> Asia
+  - from: DOH
+    to: NRT
+    carrier: QR
+    date: "2026-08-02"
+    type: stopover
+    notes: "EU_ME->Asia (explicit Asia visit)"
+
+  # Asia -> SWP (same-city: NRT/HND = Tokyo)
+  - from: HND
+    to: SYD
+    carrier: QF
+    date: "2026-08-06"
+    type: stopover
+    notes: "Asia->SWP, same-city NRT/HND=Tokyo connection"
+
+  # SWP -> EU_ME (triggers implicit Asia!)
+  - from: SYD
+    to: DOH
+    carrier: QR
+    date: "2026-08-10"
+    type: transit
+    notes: "SWP->EU_ME triggers implicit Asia (but Asia already visited!)"
+
+  # Return to origin
+  - from: DOH
+    to: CAI
+    carrier: RJ
+    date: "2026-08-11"
+    type: final
+    notes: "Return to origin"

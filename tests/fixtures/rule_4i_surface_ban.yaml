@@ -1,0 +1,54 @@
+# Rule §4(i): Transoceanic surface ban — FAIL case
+# LAX->LHR surface = TC1->TC2 = transoceanic surface sector
+# Non-SWP origin (CAI) so no exemption -> VIOLATION
+# TC2->TC3 surface (IST->BKK) is NOT restricted -> allowed
+# NOTE: Atlantic crossing is via surface so OceanCrossing rule will also fail
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: CAI
+  passengers: 1
+  departure: "2026-06-01"
+
+segments:
+  # EU_ME -> Asia
+  - from: CAI
+    to: BKK
+    carrier: RJ
+    date: "2026-06-01"
+    type: stopover
+
+  # Asia -> SWP
+  - from: BKK
+    to: SYD
+    carrier: QF
+    date: "2026-06-05"
+    type: stopover
+
+  # Pacific crossing (eastbound, flown)
+  - from: SYD
+    to: LAX
+    carrier: QF
+    date: "2026-06-09"
+    type: stopover
+
+  # TRANSOCEANIC SURFACE: TC1->TC2 = VIOLATION!
+  - from: LAX
+    to: LHR
+    date: "2026-06-13"
+    type: surface
+    notes: "SURFACE TC1->TC2 transoceanic -> VIOLATION (non-SWP origin)"
+
+  - from: LHR
+    to: DOH
+    carrier: BA
+    date: "2026-06-16"
+    type: transit
+
+  # Return to origin
+  - from: DOH
+    to: CAI
+    carrier: RJ
+    date: "2026-06-17"
+    type: final

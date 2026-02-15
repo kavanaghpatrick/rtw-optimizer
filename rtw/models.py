@@ -134,6 +134,7 @@ class Segment(BaseModel):
     from_airport: str = Field(alias="from", min_length=3, max_length=3)
     to_airport: str = Field(alias="to", min_length=3, max_length=3)
     carrier: Optional[str] = Field(default=None, min_length=2, max_length=2)
+    operating_carrier: Optional[str] = Field(default=None, min_length=2, max_length=2)
     flight: Optional[str] = None
     date: Optional[Date] = None
     type: SegmentType = SegmentType.STOPOVER
@@ -149,6 +150,11 @@ class Segment(BaseModel):
     @field_validator("carrier", mode="before")
     @classmethod
     def uppercase_carrier(cls, v: Optional[str]) -> Optional[str]:
+        return v.upper() if isinstance(v, str) else v
+
+    @field_validator("operating_carrier", mode="before")
+    @classmethod
+    def uppercase_operating_carrier(cls, v: Optional[str]) -> Optional[str]:
         return v.upper() if isinstance(v, str) else v
 
     @property

@@ -1,0 +1,49 @@
+# Rule (bonus): Implicit Asia continent counting
+# SYD->DOH = SWP->EU_ME direct flight crosses Asian airspace
+# Asia counted as visited continent for pricing (INFO, not violation)
+# NRT explicitly visits Asia too -> Asia NOT double-counted
+# Tests: ImplicitAsiaRule INFO, continent count stays at 4
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: SYD
+  passengers: 1
+  departure: "2026-06-01"
+
+segments:
+  # SWP -> EU_ME (triggers implicit Asia!)
+  - from: SYD
+    to: DOH
+    carrier: QF
+    date: "2026-06-01"
+    type: transit
+    notes: "SWP->EU_ME crosses Asian airspace -> implicit Asia"
+
+  - from: DOH
+    to: LHR
+    carrier: BA
+    date: "2026-06-02"
+    type: stopover
+
+  # Atlantic crossing (westbound)
+  - from: LHR
+    to: JFK
+    carrier: BA
+    date: "2026-06-06"
+    type: stopover
+
+  # Pacific crossing (westbound)
+  - from: JFK
+    to: NRT
+    carrier: JL
+    date: "2026-06-10"
+    type: stopover
+    notes: "Explicit Asia visit (NRT) -> Asia not double-counted"
+
+  # Return to origin
+  - from: NRT
+    to: SYD
+    carrier: QF
+    date: "2026-06-14"
+    type: final

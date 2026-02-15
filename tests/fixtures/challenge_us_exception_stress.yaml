@@ -1,0 +1,70 @@
+# Challenge 2: "US Exception Stress Test"
+# Tests: OriginCountryIntlLimitRule (US-CA exemption), OriginCountryReturnRule (initial departure chain),
+#        TranscontinentalUSRule
+# JFK origin, DONE4
+# JFK->LAX is US internal (initial departure chain), tests transcon detection
+# YYZ->JFK at end tests US-CA exemption (not counted as intl arrival)
+# Only 1 real intl departure (LAX->SYD), 0 intl arrivals (YYZ->JFK exempt)
+
+ticket:
+  type: DONE4
+  cabin: business
+  origin: JFK
+  passengers: 1
+  departure: "2026-07-01"
+
+segments:
+  # US internal (initial departure chain)
+  - from: JFK
+    to: LAX
+    carrier: AA
+    date: "2026-07-01"
+    type: transit
+    notes: "US transcon (initial departure chain)"
+
+  # Pacific crossing (westbound)
+  - from: LAX
+    to: SYD
+    carrier: QF
+    date: "2026-07-02"
+    type: stopover
+    notes: "Pacific crossing TC1->TC3, intl departure from US"
+
+  # SWP -> Asia
+  - from: SYD
+    to: NRT
+    carrier: QF
+    date: "2026-07-06"
+    type: stopover
+    notes: "SWP->Asia"
+
+  # Asia -> EU_ME
+  - from: NRT
+    to: DOH
+    carrier: QR
+    date: "2026-07-10"
+    type: transit
+    notes: "Asia->EU_ME"
+
+  - from: DOH
+    to: LHR
+    carrier: BA
+    date: "2026-07-11"
+    type: stopover
+    notes: "EU_ME internal"
+
+  # Atlantic crossing (westbound)
+  - from: LHR
+    to: YYZ
+    carrier: BA
+    date: "2026-07-15"
+    type: transit
+    notes: "Atlantic crossing TC2->TC1"
+
+  # CA -> US (exempt from intl count)
+  - from: YYZ
+    to: JFK
+    carrier: AA
+    date: "2026-07-16"
+    type: final
+    notes: "CA->US exempt from intl arrival count (US-CA exemption)"
