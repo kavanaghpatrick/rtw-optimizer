@@ -6,7 +6,7 @@ A command-line tool for optimizing [oneworld Explorer](https://www.oneworld.com/
 
 oneworld Explorer fares let you fly around the world on oneworld airlines (British Airways, Cathay Pacific, Qantas, JAL, American Airlines, Qatar, etc.) for a flat fare based on the number of continents visited. A business class ticket visiting 4 continents starts at ~$4,000 from Cairo or ~$10,500 from New York.
 
-The catch: these tickets are governed by [IATA Rule 3015](docs/01-fare-rules.md), a complex set of constraints around direction of travel, continent crossings, backtracking, carrier requirements, and segment limits. Building a valid itinerary by hand means juggling 15+ rules simultaneously while checking seat availability across a dozen airlines.
+The catch: these tickets are governed by [IATA Rule 3015](docs/01-fare-rules.md), a complex set of constraints around direction of travel, continent crossings, backtracking, carrier requirements, and segment limits. Building a valid itinerary by hand means juggling 24 rules simultaneously while checking seat availability across a dozen airlines.
 
 This tool automates all of that.
 
@@ -49,7 +49,7 @@ uv sync
 
 ```bash
 python3 -m rtw --help          # Show all commands
-uv run pytest -x -q            # Run test suite (980+ tests)
+uv run pytest -x -q            # Run test suite (1080+ tests)
 ```
 
 ### Optional: API Keys
@@ -94,7 +94,7 @@ Check an itinerary YAML file against Rule 3015:
 python3 -m rtw validate itinerary.yaml
 ```
 
-Rules checked include: direction of travel, continent coverage, segment limits, carrier requirements, backtracking restrictions, surface sector rules, and more.
+The validator runs 24 rules covering direction of travel, ocean crossings, city-pair duplication, continent coverage, segment limits, carrier eligibility, codeshare validation, surface sector restrictions, transcontinental limits (AU/US), origin-country flight limits, open-jaw validation, and more.
 
 ### Full Analysis Pipeline
 
@@ -245,7 +245,8 @@ segments:
 
 Key fields:
 - **type**: `stopover` (stay >24h) or `transfer` (<24h connection) or `surface` (overland, not flown)
-- **carrier**: Two-letter IATA airline code (must be a oneworld member)
+- **carrier**: Two-letter IATA airline code (must be a oneworld member; omit for surface sectors)
+- **operating_carrier**: Optional — actual operating carrier if different from marketing carrier (e.g., JQ operating a QF-marketed flight)
 - **from/to**: IATA airport codes
 
 ## Ticket Types
@@ -286,9 +287,12 @@ Fares vary significantly by origin city. Use the cost comparison feature to find
 | Alaska Airlines | AS | SEA | Low | |
 | Royal Air Maroc | AT | CMN | Medium | |
 | Oman Air | WY | MCT | Low | Joined June 2025 |
-| S7 Airlines | S7 | OVB | — | Suspended (sanctions) |
+| S7 Airlines | S7 | OVB | — | Suspended (sanctions), ineligible |
+| Jetstar Airways | JQ | MEL | — | Codeshare only (QF-marketed, JQ-operated) |
 
 Low-YQ carriers (JL, AA, AY, IB) can save hundreds of dollars per segment compared to high-YQ carriers (BA, QF).
+
+Jetstar (JQ) flights are permitted when marketed by Qantas (QF) as codeshares, but restricted on Alaska (AS) and Iberia (IB) ticket stock.
 
 ## Using with Claude Code
 
@@ -369,13 +373,18 @@ If you've cloned the repo, the plugin also works as a project-level integration.
 rtw/
 ├── cli.py              # All Typer CLI commands
 ├── models.py           # Pydantic models (Itinerary, Segment, Ticket, etc.)
-├── validator.py        # Rule 3015 validation orchestrator
-├── rules/              # Individual rule implementations
-│   ├── segments.py     # Segment count limits
-│   ├── carriers.py     # oneworld carrier requirements
-│   ├── direction.py    # Direction-of-travel rules
-│   ├── continents.py   # Continent crossing validation
-│   └── ...
+├── validator.py        # Rule 3015 validation orchestrator + context builder
+├── rules/              # 24 individual rule implementations
+│   ├── validity.py     # Return-to-origin, open-jaw pairs, continent count, ticket validity
+│   ├── segments.py     # Segment count + per-continent limits
+│   ├── carriers.py     # QR-first, eligible carriers, QF/JQ codeshare
+│   ├── direction.py    # Direction of travel, ocean crossings, city-pair direction
+│   ├── stopovers.py    # Minimum stopovers, origin-continent stopover limit
+│   ├── hemisphere.py   # Hemisphere revisit (backtracking)
+│   ├── intercontinental.py  # Intercontinental arrival/departure limits
+│   ├── surface.py      # Same-city resolution, transoceanic surface ban
+│   ├── geography.py    # Hawaii/Alaska, US/AU transcontinental, implicit Asia
+│   └── country.py      # Origin-country intl flight limits, mid-journey return ban
 ├── airports.py         # Shared airportsdata loader (fail-fast)
 ├── cost.py             # Fare lookup + YQ calculation
 ├── ntp.py              # BA New Tier Points estimator
@@ -397,13 +406,16 @@ rtw/
 │   ├── serpapi_flights.py  # Google Flights via SerpAPI
 │   ├── expertflyer.py      # ExpertFlyer scraper (Playwright)
 │   └── cache.py            # Response caching
-├── continents.py       # Airport → continent mapping
+├── continents.py       # Airport → continent mapping, country helpers, open-jaw validation
 ├── distance.py         # Great-circle distance calculator
 ├── data/               # Reference YAML files
-│   ├── carriers.yaml   # oneworld carrier data (16 carriers)
+│   ├── carriers.yaml   # oneworld carrier data (17 carriers incl. JQ codeshare)
 │   ├── fares.yaml      # Base fare tables (AONE/DONE/LONE x 8 origins)
 │   ├── ntp_rates.yaml  # BA NTP earning rates by carrier + booking class
-│   └── continents.yaml # Airport-continent mappings
+│   ├── continents.yaml # Airport-continent mappings + country assignments
+│   ├── same_cities.yaml # Same-city airport groups (NRT/HND, LHR/LGW, etc.)
+│   ├── surcharges.yaml # YQ surcharge rates per carrier
+│   └── hubs.yaml       # Carrier hub airports
 └── output/             # Rich + plain text formatters
 ```
 
@@ -412,7 +424,7 @@ rtw/
 ### Running Tests
 
 ```bash
-uv run pytest                          # All tests (980+)
+uv run pytest                          # All tests (1080+)
 uv run pytest tests/test_cost.py -x    # Single file, stop on failure
 uv run pytest -m "not slow" -x         # Skip slow tests
 uv run pytest -k "test_validate" -v    # Filter by name, verbose
@@ -444,14 +456,34 @@ ruff check --fix rtw/ tests/           # Auto-fix what's possible
 
 ### Rule 3015
 
-The IATA fare rule that governs round-the-world ticket construction. Key constraints:
+The IATA fare rule that governs round-the-world ticket construction. The validator implements 24 rules across 10 modules:
 
-- **Direction**: Must travel consistently eastbound or westbound (no zigzagging)
-- **Continents**: Must visit the exact number of continents your ticket covers (3, 4, 5, or 6)
-- **Backtracking**: Cannot return to a tariff conference (TC1/TC2/TC3) once you've left it (with exceptions for the return to origin)
-- **Segments**: Maximum 16 flown segments
-- **Surface sectors**: Allowed but count toward routing constraints
-- **Carriers**: All flown segments must be on oneworld member airlines
+| Rule | Section | What It Checks |
+|------|---------|---------------|
+| Return to Origin | General | Itinerary ends at origin (or permitted open-jaw) |
+| Open-Jaw Pairs | §4(c) | Surface sector endpoints are in permitted bilateral pairs |
+| Continent Count | General | Visited continents match ticket type (3/4/5/6) |
+| Ticket Validity | §3 | Trip completes within 12-month validity period |
+| Segment Count | §6 | Max 16 flown segments |
+| Per-Continent Limit | §6 | Max segments per continent (default 4, some 5) |
+| QR Not First | §4(j) | Qatar Airways cannot be the first carrier flown |
+| Eligible Carriers | §4(j) | All carriers must be eligible oneworld members (codeshare recognition) |
+| QF/JQ Codeshare | §4(j) | Jetstar codeshares restricted on AS/IB ticket stock |
+| Direction of Travel | §7 | Consistent eastbound or westbound (no zigzagging) |
+| Ocean Crossings | §7 | Both Atlantic and Pacific must be crossed by air |
+| City-Pair Direction | §8 | Same city-pair cannot be flown twice in the same direction |
+| Minimum Stopovers | General | At least 1 stopover required |
+| Origin Stopover Limit | General | Max stopovers in origin continent |
+| Hemisphere Revisit | §7 | No backtracking to a previously left tariff conference |
+| Intercontinental Limits | General | Max intercontinental arrivals/departures per continent |
+| Same-City Resolution | §4(d) | Resolves multi-airport cities (NRT/HND, LHR/LGW) |
+| Transoceanic Surface | §4(i) | No surface sectors between TC1-TC2 or TC1-TC3 (SWP exemption) |
+| Hawaii & Alaska | §4(k) | Special handling for US non-contiguous territories |
+| US Transcontinental | §4(l) | Limits on US coast-to-coast nonstop flights |
+| AU Transcontinental | §4(l) | Limits on Australia east coast-Perth/Darwin nonstops |
+| Implicit Asia | Pricing | EU_ME-SWP direct flights count Asia as visited continent |
+| Origin Country Intl | §4(f) | Max 1 international departure + 1 arrival from origin country |
+| Origin Country Return | §4(f) | No mid-journey return to origin country (departure chain exemptions) |
 
 See [docs/01-fare-rules.md](docs/01-fare-rules.md) for the complete rule reference.
 

@@ -10,7 +10,7 @@ oneworld Explorer round-the-world ticket optimizer. Validates itineraries agains
 | CLI | Typer + Rich |
 | Models | Pydantic v2 |
 | Package mgr | uv (use `uv run`, `uv sync`) |
-| Tests | pytest (980+ tests) |
+| Tests | pytest (1080+ tests) |
 | Lint | ruff |
 | Scraping | Playwright + httpx |
 
@@ -57,7 +57,7 @@ python3 -m rtw verify                  # Verify D-class availability (needs Expe
 | CLI | `rtw/cli.py` | All Typer commands and display logic |
 | Models | `rtw/models.py` | Itinerary, Segment, Ticket, CabinClass, TicketType |
 | Validator | `rtw/validator.py` | Rule 3015 orchestrator — builds ValidationContext, runs rules |
-| Rules | `rtw/rules/` | Individual rule files (segments, carriers, direction, continents, etc.) |
+| Rules | `rtw/rules/` | 24 rules across 10 files (segments, carriers, direction, geography, country, surface, validity, etc.) |
 | Airports | `rtw/airports.py` | Shared airportsdata loader (fail-fast, single import) |
 | Cost | `rtw/cost.py` | Fare lookup + YQ surcharge calculation + FareLookupError |
 | NTP | `rtw/ntp.py` | BA New Tier Points estimator |
@@ -67,7 +67,7 @@ python3 -m rtw verify                  # Verify D-class availability (needs Expe
 | Nonstop | `rtw/nonstop/` | Nonstop route pre-verification via SerpAPI |
 | Verify | `rtw/verify/` | D-class verification (models, state, orchestrator) |
 | Scraper | `rtw/scraper/` | Google Flights (SerpAPI) + ExpertFlyer scrapers |
-| Continents | `rtw/continents.py` | Airport → continent mapping with overrides |
+| Continents | `rtw/continents.py` | Airport → continent mapping, country helpers, open-jaw validation |
 | Distance | `rtw/distance.py` | Great-circle distance calculator |
 | Data | `rtw/data/` | YAML reference: carriers, fares, continents, hubs |
 | Output | `rtw/output/` | Rich + plain text formatters |
@@ -112,7 +112,7 @@ python3 -m rtw verify                  # Verify D-class availability (needs Expe
 | `docs/ARCHITECTURE.md` | Full architecture documentation (15KB) |
 | `01-fare-rules.md` | Authoritative IATA Rule 3015 fare rules (project root) |
 | `12-rtw-optimization-guide.md` | RTW trip optimization strategies (project root) |
-| `rtw/data/carriers.yaml` | oneworld carrier list (16 carriers incl. WY, S7 ineligible) |
+| `rtw/data/carriers.yaml` | oneworld carrier list (17 carriers incl. JQ codeshare, WY, S7 ineligible) |
 | `rtw/data/fares.yaml` | Base fare table: AONE/DONE/LONE x 8 origins |
 | `rtw/data/continents.yaml` | Airport → continent/TC mappings |
 
