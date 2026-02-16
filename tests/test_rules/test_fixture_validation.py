@@ -329,3 +329,36 @@ class TestRuleFixtures:
         # SWP, EU_ME, N_America, Asia (implicit or explicit via NRT)
         continent_results = _results_by_rule(report, "continent_count")
         assert all(r.passed for r in continent_results)
+
+
+# ---------------------------------------------------------------------------
+# Via Through-Flight Fixtures
+# ---------------------------------------------------------------------------
+
+class TestViaFixtures:
+    """Tests for through-flight via-stop counting."""
+
+    def test_via_through_flight_full_pipeline(self, validator):
+        """via_through_flight.yaml: DONE5 with via: SIN on NRT-SYD.
+        Asia counted from NRT segment + reinforced by via SIN.
+        Married segment rule produces result (no CX, no via-split risk).
+        5 continents -> DONE5 passes continent count.
+        """
+        report = validator.validate(_load("via_through_flight.yaml"))
+
+        # Continent count passes (5 continents)
+        continent_results = _results_by_rule(report, "continent_count")
+        assert all(r.passed for r in continent_results)
+
+        # Married segment rule fires (pass = no risks detected)
+        married_results = _results_by_rule(report, "married_segment")
+        assert len(married_results) >= 1
+        # No CX, no via-split risk -> should pass
+        assert all(r.passed for r in married_results)
+
+        # Return to origin: LHR->LHR
+        return_results = _results_by_rule(report, "return_to_origin")
+        assert all(r.passed for r in return_results)
+
+        # Overall should pass (no violations)
+        assert report.passed

@@ -101,6 +101,34 @@ class TestSegment:
         s = Segment(**{"from": "CAI", "to": "AMM"})
         assert s.type == SegmentType.STOPOVER
 
+    def test_via_default_none(self):
+        s = Segment(**{"from": "SYD", "to": "LHR", "carrier": "QF"})
+        assert s.via is None
+        assert s.has_via is False
+        assert s.via_airports == []
+
+    def test_via_string_normalized(self):
+        s = Segment(**{"from": "SYD", "to": "LHR", "carrier": "QF", "via": "sin"})
+        assert s.via == ["SIN"]
+        assert s.has_via is True
+        assert s.via_airports == ["SIN"]
+
+    def test_via_list_normalized(self):
+        s = Segment(**{"from": "DOH", "to": "ADL", "carrier": "QR", "via": ["sin", "kul"]})
+        assert s.via == ["SIN", "KUL"]
+        assert s.has_via is True
+        assert s.via_airports == ["SIN", "KUL"]
+
+    def test_via_empty_list(self):
+        s = Segment(**{"from": "SYD", "to": "LHR", "carrier": "QF", "via": []})
+        assert s.has_via is False
+        assert s.via_airports == []
+
+    def test_via_preserved_in_model_dump(self):
+        s = Segment(**{"from": "SYD", "to": "LHR", "carrier": "QF", "via": "sin"})
+        d = s.model_dump(mode="json")
+        assert d["via"] == ["SIN"]
+
 
 # --- Itinerary Tests ---
 

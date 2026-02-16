@@ -195,6 +195,92 @@ class TestWarnings:
         assert len(ib_warnings) >= 1
 
 
+class TestThroughFlightWarnings:
+    """Test through-flight via-stop annotations in booking script."""
+
+    def test_via_produces_through_flight_warning(self, generator):
+        """Segment with via produces through-flight warning."""
+        itin = Itinerary(
+            ticket={"type": "DONE4", "cabin": "business", "origin": "SYD"},
+            segments=[
+                {"from": "SYD", "to": "LHR", "carrier": "QF", "via": "SIN"},
+                {"from": "LHR", "to": "NRT", "carrier": "JL"},
+                {"from": "NRT", "to": "LAX", "carrier": "JL"},
+                {"from": "LAX", "to": "SYD", "carrier": "QF", "type": "final"},
+            ],
+        )
+        scripts = generator._segment_scripts(itin)
+        via_warnings = [w for w in scripts[0].warnings if "Through-flight" in w]
+        assert len(via_warnings) == 1
+        assert "SIN" in via_warnings[0]
+        assert "single segment" in via_warnings[0]
+
+    def test_via_shows_in_phone_instruction(self, generator):
+        """Via info appears in phone instruction text."""
+        itin = Itinerary(
+            ticket={"type": "DONE4", "cabin": "business", "origin": "SYD"},
+            segments=[
+                {"from": "SYD", "to": "LHR", "carrier": "QF", "via": "SIN"},
+                {"from": "LHR", "to": "NRT", "carrier": "JL"},
+                {"from": "NRT", "to": "LAX", "carrier": "JL"},
+                {"from": "LAX", "to": "SYD", "carrier": "QF", "type": "final"},
+            ],
+        )
+        scripts = generator._segment_scripts(itin)
+        assert "Through-flight via: SIN" in scripts[0].phone_instruction
+
+    def test_no_via_no_through_flight_warning(self, generator):
+        """Segment without via has no through-flight warning."""
+        itin = Itinerary(
+            ticket={"type": "DONE4", "cabin": "business", "origin": "SYD"},
+            segments=[
+                {"from": "SYD", "to": "LHR", "carrier": "QF"},
+                {"from": "LHR", "to": "NRT", "carrier": "JL"},
+                {"from": "NRT", "to": "LAX", "carrier": "JL"},
+                {"from": "LAX", "to": "SYD", "carrier": "QF", "type": "final"},
+            ],
+        )
+        scripts = generator._segment_scripts(itin)
+        via_warnings = [w for w in scripts[0].warnings if "Through-flight" in w]
+        assert len(via_warnings) == 0
+
+    def test_gds_via_segment_single_entry(self, generator):
+        """GDS command for via segment is a single SS entry (not split)."""
+        itin = Itinerary(
+            ticket={"type": "DONE4", "cabin": "business", "origin": "SYD"},
+            segments=[
+                {"from": "SYD", "to": "LHR", "carrier": "QF", "via": "SIN",
+                 "flight": "QF1", "date": "2026-04-01"},
+                {"from": "LHR", "to": "NRT", "carrier": "JL",
+                 "date": "2026-04-05"},
+                {"from": "NRT", "to": "LAX", "carrier": "JL",
+                 "date": "2026-04-10"},
+                {"from": "LAX", "to": "SYD", "carrier": "QF", "type": "final",
+                 "date": "2026-04-15"},
+            ],
+        )
+        gds = generator._gds_commands(itin)
+        # First SS command should be SYD-LHR, not SYD-SIN + SIN-LHR
+        ss_commands = [c for c in gds if c.startswith("SS")]
+        assert any("SYDLHR" in c for c in ss_commands)
+        assert not any("SYDSIN" in c for c in ss_commands)
+
+    def test_cx_booking_warning(self, generator):
+        """CX segment not through HKG triggers D-class married warning."""
+        itin = Itinerary(
+            ticket={"type": "DONE4", "cabin": "business", "origin": "LHR"},
+            segments=[
+                {"from": "LHR", "to": "NRT", "carrier": "CX"},
+                {"from": "NRT", "to": "SYD", "carrier": "QF"},
+                {"from": "SYD", "to": "LAX", "carrier": "QF"},
+                {"from": "LAX", "to": "LHR", "carrier": "BA", "type": "final"},
+            ],
+        )
+        scripts = generator._segment_scripts(itin)
+        cx_warnings = [w for w in scripts[0].warnings if "CX" in w and "HKG" in w]
+        assert len(cx_warnings) == 1
+
+
 # --- T033: GDS commands ---
 
 
