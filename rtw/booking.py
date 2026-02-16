@@ -206,6 +206,27 @@ class BookingGenerator:
                         f"Flight {flight_num}: check operating carrier is IB."
                     )
 
+            # --- Through-flight via-stop annotation ---
+            via_info = ""
+            if seg.has_via:
+                via_str = ", ".join(seg.via_airports)
+                via_info = f"\n  Through-flight via: {via_str} (book as single segment)"
+                warnings.append(
+                    f"Through-flight {route} via {via_str}: must be booked as a "
+                    f"single segment. Splitting into separate segments requires "
+                    f"reissue and may incur fees."
+                )
+
+            # --- CX hub-connection warning ---
+            if seg.carrier == "CX":
+                from_apt = seg.from_airport
+                to_apt = seg.to_airport
+                if from_apt != "HKG" and to_apt != "HKG":
+                    warnings.append(
+                        f"CX {from_apt}-{to_apt}: D-class may be married through HKG. "
+                        f"Check standalone availability via ExpertFlyer."
+                    )
+
             # --- Build phone instruction ---
             date_str = seg.date.strftime("%d %b %Y") if seg.date else "date TBD"
             flight_info = f" flight {seg.flight}" if seg.flight else ""
@@ -214,6 +235,8 @@ class BookingGenerator:
                 f"Segment {i + 1}: {seg.carrier}{flight_info} — {route} — {date_str}\n"
                 f"  Booking class: {booking_class}"
             )
+            if via_info:
+                instruction += via_info
             if fj_atr_note:
                 instruction += fj_atr_note
             if seg.notes:
