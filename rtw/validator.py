@@ -46,6 +46,10 @@ class ValidationContext:
     implicit_continents: list[Continent] = field(default_factory=list)
     # Segments that triggered implicit continent detection {continent: [seg_indices]}
     implicit_continent_segments: dict[Continent, list[int]] = field(default_factory=dict)
+    # Via-stop continent visits (through-flight technical stops)
+    via_continents: list[Continent] = field(default_factory=list)
+    # Segments that triggered via-continent detection {continent: [(seg_index, via_airport)]}
+    via_continent_segments: dict[Continent, list[tuple[int, str]]] = field(default_factory=dict)
 
 
 def build_context(itinerary: Itinerary) -> ValidationContext:
@@ -132,10 +136,41 @@ def build_context(itinerary: Itinerary) -> ValidationContext:
     ctx.intercontinental_arrivals = ic_arrivals
     ctx.intercontinental_departures = ic_departures
 
+    # Count via-stop continents (through-flight technical stops).
+    # Via stops affect continent pricing but NOT per-continent segment limits.
+    _detect_via_continents(ctx, itinerary)
+
     # Detect implicit continent visits (e.g., Asia for EU_ME<->SWP flights)
     _detect_implicit_continents(ctx, itinerary)
 
     return ctx
+
+
+def _detect_via_continents(ctx: ValidationContext, itinerary: Itinerary) -> None:
+    """Count continents from through-flight via stops (Rule 3015 §16).
+
+    Through-flights with intermediate stops count each stop's continent
+    as visited for pricing, but do NOT add to per-continent segment limits
+    (the through-flight is still one segment).
+    """
+    via_segments: dict[Continent, list[tuple[int, str]]] = {}
+
+    for i, seg in enumerate(itinerary.segments):
+        if not seg.has_via:
+            continue
+        for via_apt in seg.via_airports:
+            via_cont = get_continent(via_apt)
+            if via_cont is None:
+                continue
+            if via_cont not in via_segments:
+                via_segments[via_cont] = []
+            via_segments[via_cont].append((i, via_apt))
+            # Add to continents_visited if not already present
+            if via_cont not in ctx.continents_visited:
+                ctx.continents_visited.append(via_cont)
+
+    ctx.via_continent_segments = via_segments
+    ctx.via_continents = list(via_segments.keys())
 
 
 def _detect_implicit_continents(ctx: ValidationContext, itinerary: Itinerary) -> None:
@@ -193,6 +228,7 @@ class Validator:
         import rtw.rules.hemisphere  # noqa: F401
         import rtw.rules.intercontinental  # noqa: F401
         import rtw.rules.country  # noqa: F401
+        import rtw.rules.married  # noqa: F401
 
     def validate(self, itinerary: Itinerary) -> ValidationReport:
         """Run all rules and return a validation report."""
