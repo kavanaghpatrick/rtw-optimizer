@@ -1,0 +1,66 @@
+# Through-flight via-stop test: DONE5 business from LHR
+# Tests that a through-flight via: SIN counts Asia from via stop
+# without consuming an extra segment.
+#
+# Route: LHR -> NRT -> SYD (via SIN) -> LAX -> GRU -> JFK -> LHR (eastbound)
+# Key: NRT-SYD segment has via: SIN (through-flight technical stop in Singapore)
+# Continents: EU_ME, Asia (NRT + reinforced by via SIN), SWP, N_America, S_America = 5
+# Via-stop does NOT add to segments_per_continent for Asia
+# 6 segments, all within limits
+
+ticket:
+  type: DONE5
+  cabin: business
+  origin: LHR
+  passengers: 1
+  departure: "2026-04-01"
+
+segments:
+  # EU_ME -> Asia (TC2 -> TC3)
+  - from: LHR
+    to: NRT
+    carrier: JL
+    date: "2026-04-01"
+    type: stopover
+    notes: "JAL to Tokyo"
+
+  # Asia -> SWP (within TC3) — through-flight via SIN
+  - from: NRT
+    to: SYD
+    carrier: QF
+    date: "2026-04-05"
+    type: stopover
+    via: SIN
+    notes: "Qantas to Sydney — through-flight via Singapore"
+
+  # SWP -> N_America (TC3 -> TC1 — Pacific crossing)
+  - from: SYD
+    to: LAX
+    carrier: QF
+    date: "2026-04-10"
+    type: stopover
+    notes: "Qantas A380 — Pacific crossing"
+
+  # N_America -> S_America (within TC1)
+  - from: LAX
+    to: GRU
+    carrier: AA
+    date: "2026-04-15"
+    type: stopover
+    notes: "AA to Sao Paulo"
+
+  # S_America -> N_America (within TC1)
+  - from: GRU
+    to: JFK
+    carrier: AA
+    date: "2026-04-20"
+    type: stopover
+    notes: "AA return to JFK"
+
+  # N_America -> EU_ME (TC1 -> TC2 — Atlantic crossing)
+  - from: JFK
+    to: LHR
+    carrier: BA
+    date: "2026-04-25"
+    type: final
+    notes: "BA Club World — Atlantic crossing, return to origin"
