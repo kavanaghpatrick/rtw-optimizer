@@ -1,0 +1,67 @@
+# Known oneworld through-flights with cross-continent impact
+# Through-flight = single flight number with intermediate stop(s)
+# Counts as ONE segment per Rule 3015, but ALL stop-continents count for pricing (§16)
+#
+# Fields:
+#   carrier: 2-letter IATA code
+#   flights: list of flight numbers
+#   from/to: origin/destination airport codes
+#   via: list of intermediate stop airports
+#   continents_added: continents gained from via stops (not from from/to)
+#   notes: optional context
+#
+# Only includes through-flights where via stop adds a DIFFERENT continent
+# than the origin or destination (i.e., cross-continent impact).
+# Through-flights where via stop is in the same continent as from/to
+# (e.g., QF5/6 SYD-PER-FCO where PER=SWP same as SYD) are listed
+# separately under "same_continent_via" for reference.
+
+cross_continent:
+  - carrier: QF
+    flights: ["QF1", "QF2"]
+    from: SYD
+    to: LHR
+    via: [SIN]
+    continents_added: [Asia]
+    notes: "Flagship A380 service. SIN stop adds Asia to SWP+EU_ME route."
+
+  - carrier: BA
+    flights: ["BA15", "BA16"]
+    from: LHR
+    to: SYD
+    via: [SIN]
+    continents_added: [Asia]
+    notes: "BA's Australia service. SIN stop adds Asia to EU_ME+SWP route."
+
+  - carrier: QR
+    flights: ["QR920", "QR921"]
+    from: DOH
+    to: ADL
+    via: [SIN]
+    continents_added: [Asia]
+    notes: "Qatar to Adelaide. SIN stop adds Asia to EU_ME+SWP route."
+
+  - carrier: QR
+    flights: ["QR908", "QR909"]
+    from: DOH
+    to: MEL
+    via: [SIN]
+    continents_added: [Asia]
+    notes: "Qatar to Melbourne. SIN stop adds Asia to EU_ME+SWP route."
+
+same_continent_via:
+  - carrier: QF
+    flights: ["QF5", "QF6"]
+    from: SYD
+    to: FCO
+    via: [PER]
+    continents_added: []
+    notes: "PER is SWP (same as SYD). No cross-continent impact."
+
+  - carrier: QF
+    flights: ["QF3", "QF4"]
+    from: SYD
+    to: JFK
+    via: [AKL]
+    continents_added: []
+    notes: "AKL is SWP (same as SYD). No cross-continent impact."
