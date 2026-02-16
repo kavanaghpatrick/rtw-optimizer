@@ -751,20 +751,18 @@ class TestNoMileageCap:
 class TestInvalidFixtures:
     """Test that invalid YAML fixtures produce the expected violations."""
 
-    def test_qr_first_fails(self, qr_first_itinerary):
-        """QR as first carrier triggers qr_not_first violation."""
+    def test_qr_first_warns(self, qr_first_itinerary):
+        """QR as first carrier triggers qr_not_first warning (booking tool limitation)."""
         itin = _build_itinerary(qr_first_itinerary)
         validator = Validator()
         report = validator.validate(itin)
 
-        assert report.passed is False, "Expected validation to FAIL for QR-first itinerary"
-
-        qr_violations = [v for v in report.violations if v.rule_id == "qr_not_first"]
-        assert len(qr_violations) >= 1, (
-            "Expected qr_not_first violation, got violations: "
-            + "; ".join(f"[{v.rule_id}] {v.message}" for v in report.violations)
+        qr_warnings = [w for w in report.warnings if w.rule_id == "qr_not_first"]
+        assert len(qr_warnings) >= 1, (
+            "Expected qr_not_first warning, got warnings: "
+            + "; ".join(f"[{w.rule_id}] {w.message}" for w in report.warnings)
         )
-        assert "QR" in qr_violations[0].message or "Qatar" in qr_violations[0].message
+        assert "QR" in qr_warnings[0].message or "Qatar" in qr_warnings[0].message
 
     def test_hawaii_backtrack_fails(self, hawaii_backtrack_itinerary):
         """Hawaii backtracking triggers hawaii_alaska violation."""

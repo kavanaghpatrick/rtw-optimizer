@@ -91,10 +91,11 @@ oneworld divides the world into **6 continents** mapped to IATA Tariff Conferenc
 
 ### Intercontinental Departures/Arrivals
 - Only **one intercontinental departure** and **one intercontinental arrival** permitted in each continent
-- **Exceptions**:
+- **Exceptions** (Rule 3015 §4(e)):
   - **Two** permitted in North America
-  - **Two** permitted in Asia when one is for travel between SWP and Europe
-  - **Two** permitted for US-origin when one arrival-departure is a transfer without stopover
+  - **Two** permitted in Asia (unconditional since April 2025 update; previously required SWP↔EU_ME bridge)
+  - **Two** permitted in Europe/Middle East for travel to/from/via Africa (if both IC flights are Africa↔Europe Zone, SA and Mauritius excluded)
+  - **Two** permitted for US-origin when one arrival-departure is a transfer without stopover (§4(f))
 
 ---
 
@@ -153,6 +154,7 @@ Travel must be in a **continuous forward direction** between Tariff Conferences:
   - Maldives / Sri Lanka / India
 
 ### Prohibited Surface Sectors
+- **First segment cannot be a surface sector** — the itinerary must begin with a flown segment. The ticket origin is defined by the departure point of the first flight. (Source: oneworld booking rules, confirmed via FlyerTalk community)
 - **Transoceanic surface sectors** between TC1-TC2 and TC1-TC3 are **NOT permitted**
 - Exception: SWP-origin itineraries may have one transoceanic surface sector
 
@@ -319,9 +321,11 @@ Intermediate surface sectors (landing at one airport, departing from another en 
 
 ## 19. Additional Rules
 
-### QR as First Carrier
-- **Qatar Airways (QR) CANNOT be the first flight** on a oneworld Explorer ticket
-- QR can operate segments later in the itinerary
+### QR as First Carrier (Booking Tool Limitation — NOT in Rule 3015)
+- The **oneworld online booking tool (xONEx) cannot issue tickets starting with QR** as the first carrier
+- This is **not** a fare rule — QR is listed as permitted ticket stock in Rule 3015 §15 alongside all other carriers
+- **Workaround**: Book via AA RTW desk (+1 800 843 3000) or a travel agent, who can manually set the validating carrier
+- QR can operate the first segment when another carrier (e.g., AA) is set as the validating carrier in the GDS
 
 ### PNR Requirement
 - **OSI YY OW RTW** must be inserted into the PNR to avoid reservation cancellation

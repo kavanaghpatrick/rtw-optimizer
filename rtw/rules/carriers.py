@@ -25,7 +25,7 @@ class QRNotFirstRule:
 
     rule_id = "qr_not_first"
     rule_name = "QR Not First Carrier"
-    rule_reference = "Rule 3015 §19"
+    rule_reference = "oneworld booking tool"
 
     def check(self, itinerary, context) -> list[RuleResult]:
         # Find first flown segment
@@ -38,9 +38,11 @@ class QRNotFirstRule:
                             rule_name=self.rule_name,
                             rule_reference=self.rule_reference,
                             passed=False,
-                            severity=Severity.VIOLATION,
-                            message="Qatar Airways (QR) cannot be the first carrier on a oneworld Explorer ticket.",
-                            fix_suggestion="Start with a different carrier (e.g., RJ for CAI-AMM, CX, BA).",
+                            severity=Severity.WARNING,
+                            message="Qatar Airways (QR) is the first carrier. "
+                            "The online booking tool cannot issue tickets starting with QR; "
+                            "book via AA RTW desk (+1 800 843 3000) or a travel agent.",
+                            fix_suggestion="Start with a different carrier, or book by phone through the AA RTW desk.",
                         )
                     ]
                 else:

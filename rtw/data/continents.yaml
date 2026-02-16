@@ -60,7 +60,7 @@ countries:
     - BE
     - IE
     - SE
-    - NO
+    - "NO"  # YAML parses bare NO as boolean False — must quote
     - DK
     - FI
     - GR

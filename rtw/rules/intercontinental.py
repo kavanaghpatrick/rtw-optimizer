@@ -101,25 +101,24 @@ class IntercontinentalLimitRule:
         return results
 
     def _get_limit(self, continent, context) -> int:
-        """Determine the intercontinental limit for a continent."""
+        """Determine the intercontinental limit for a continent.
+
+        Rule 3015 §4(e) exceptions:
+        1. North America: always 2
+        2. Asia: always 2 (April 2025 update removed SWP-EU_ME bridge condition)
+        3. EU/ME: 2 when itinerary includes Africa
+        """
         if continent == Continent.N_AMERICA:
             return self.NA_LIMIT
 
         if continent == Continent.ASIA:
-            if self._asia_bridge_applies(context):
-                return 2
+            return 2  # Rule 3015 §4(e)2 — unconditional since April 2025
 
         if continent == Continent.EU_ME:
             if self._eu_me_africa_applies(context):
                 return 2
 
         return self.DEFAULT_LIMIT
-
-    @staticmethod
-    def _asia_bridge_applies(context) -> bool:
-        """Asia gets 2 when itinerary bridges SWP and EU_ME through Asia."""
-        visited = set(context.continents_visited)
-        return Continent.SWP in visited and Continent.EU_ME in visited
 
     @staticmethod
     def _eu_me_africa_applies(context) -> bool:

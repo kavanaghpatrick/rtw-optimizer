@@ -184,11 +184,8 @@ class TestJNBFixture:
 
 
 class TestIntercontinentalLimitViolations:
-    def test_two_arrivals_in_asia_default_fails(self):
-        """2 IC arrivals in Asia without SWP/EU_ME bridge => violation."""
-        # Route: JNB->HKG, HKG->DEL, DEL->KUL, SIN->NRT (all Asia),
-        # then NRT->SFO (depart Asia), SFO->NRT (arrive Asia again)
-        # But without SWP and EU_ME visited, Asia limit is 1
+    def test_two_arrivals_in_asia_passes(self):
+        """2 IC arrivals in Asia => passes (Asia always allows 2 since April 2025)."""
         itin = _make_itinerary([
             {"from": "JNB", "to": "HKG", "carrier": "CX"},  # IC arrival Asia #1
             {"from": "HKG", "to": "NRT", "carrier": "CX"},  # intra-Asia
@@ -199,25 +196,25 @@ class TestIntercontinentalLimitViolations:
         ctx = build_context(itin)
         results = IntercontinentalLimitRule().check(itin, ctx)
         violations = [r for r in results if not r.passed]
-        # Asia should have violations (2 arrivals, 2 departures, limit 1)
-        assert len(violations) > 0
         asia_violations = [r for r in violations if "Asia" in r.message]
-        assert len(asia_violations) > 0
+        # Asia unconditionally allows 2 IC arrivals/departures
+        assert len(asia_violations) == 0
 
-    def test_two_arrivals_in_asia_bridge_passes(self):
-        """2 IC arrivals in Asia WITH SWP+EU_ME => passes (bridge exception)."""
+    def test_three_arrivals_in_asia_fails(self):
+        """3 IC arrivals in Asia => violation (limit is 2)."""
         itin = _make_itinerary([
-            {"from": "SYD", "to": "HKG", "carrier": "CX"},  # IC arr Asia #1 (from SWP)
-            {"from": "HKG", "to": "LHR", "carrier": "CX"},  # IC dep Asia (to EU_ME)
-            {"from": "LHR", "to": "JFK", "carrier": "BA"},  # IC dep EU_ME
-            {"from": "JFK", "to": "NRT", "carrier": "JL"},  # IC arr Asia #2 (from NA)
-            {"from": "NRT", "to": "SYD", "carrier": "QF"},  # IC dep Asia (to SWP)
-        ], origin="SYD", ticket_type="DONE4")
+            {"from": "JNB", "to": "HKG", "carrier": "CX"},  # IC arrival Asia #1
+            {"from": "HKG", "to": "SFO", "carrier": "CX"},  # IC depart Asia
+            {"from": "SFO", "to": "NRT", "carrier": "JL"},  # IC arrival Asia #2
+            {"from": "NRT", "to": "SYD", "carrier": "QF"},  # IC depart Asia
+            {"from": "SYD", "to": "BKK", "carrier": "QF"},  # IC arrival Asia #3
+            {"from": "BKK", "to": "JNB", "carrier": "QR"},  # IC depart Asia
+        ], origin="JNB", ticket_type="DONE4")
         ctx = build_context(itin)
         results = IntercontinentalLimitRule().check(itin, ctx)
         violations = [r for r in results if not r.passed]
         asia_violations = [r for r in violations if "Asia" in r.message]
-        assert len(asia_violations) == 0
+        assert len(asia_violations) > 0
 
     def test_two_arrivals_in_na_passes(self):
         """2 IC arrivals in N_America => passes (NA always allows 2)."""

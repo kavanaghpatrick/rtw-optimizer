@@ -9,53 +9,57 @@ _HAWAII_AIRPORTS = {"HNL", "OGG", "KOA", "LIH", "ITO"}
 # Alaska airports
 _ALASKA_AIRPORTS = {"ANC", "FAI", "JNU", "SIT", "KTN"}
 # US mainland (approximate — for transcontinental check)
+# Rule 3015 §4(k) Column B — Eastern states
+# CT, FL, GA, IN, KY, MD, MA, MI, NJ, NY, NC, OH, PA, SC, TN, VA, DC
 _US_EAST = {
-    "JFK",
-    "LGA",
-    "EWR",
-    "BOS",
-    "PHL",
-    "DCA",
-    "IAD",
-    "BWI",
+    # Connecticut
+    "BDL",
+    # Florida
+    "MIA", "FLL", "MCO", "TPA", "JAX", "PBI", "RSW", "EYW",
+    # Georgia
     "ATL",
-    "MIA",
-    "MCO",
-    "FLL",
-    "TPA",
-    "CLT",
-    "RDU",
-    "PIT",
-    "DTW",
-    "CLE",
-    "CVG",
+    # Indiana
     "IND",
-    "MSP",
-    "STL",
-    "MCI",
-    "MSY",
-    "BNA",
-    "MEM",
-    "ORD",
-    "MDW",
+    # Kentucky
+    "CVG", "SDF",
+    # Maryland
+    "BWI",
+    # Massachusetts
+    "BOS",
+    # Michigan
+    "DTW", "GRR",
+    # New Jersey
+    "EWR",
+    # New York
+    "JFK", "LGA",
+    # North Carolina
+    "CLT", "RDU",
+    # Ohio
+    "CLE", "CMH",
+    # Pennsylvania
+    "PHL", "PIT",
+    # South Carolina
+    "CHS", "GSP",
+    # Tennessee
+    "BNA", "MEM",
+    # Virginia
+    "DCA", "IAD", "RIC", "ORF",
+    # Washington DC
+    # (DCA/IAD already listed under Virginia)
 }
+# Rule 3015 §4(k) Column A — Western states
+# AZ, CA, NV, OR, WA
 _US_WEST = {
-    "LAX",
-    "SFO",
-    "SEA",
+    # Arizona
+    "PHX", "TUS",
+    # California
+    "LAX", "SFO", "SAN", "SJC", "OAK", "SMF", "ONT", "BUR", "LGB", "SNA",
+    # Nevada
+    "LAS", "RNO",
+    # Oregon
     "PDX",
-    "SAN",
-    "SJC",
-    "OAK",
-    "SMF",
-    "LAS",
-    "PHX",
-    "DEN",
-    "SLC",
-    "DFW",
-    "IAH",
-    "AUS",
-    "SAT",
+    # Washington
+    "SEA",
 }
 
 
