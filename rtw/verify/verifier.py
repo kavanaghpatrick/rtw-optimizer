@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 _CACHE_TTL_HOURS = 24
 _CACHE_KEY_PREFIX = "dclass"
 
+# Carriers with known married segment patterns (hub-connection)
+_MARRIED_CHECK_HUBS = {
+    "CX": "HKG",
+    "QR": "DOH",
+}
+
 
 class DClassVerifier:
     """Verify award class availability for itinerary segments.
@@ -95,6 +101,33 @@ class DClassVerifier:
             return
         key = self._cache_key(seg)
         self.cache.set(key, result.model_dump(mode="json"), ttl_hours=_CACHE_TTL_HOURS)
+
+    def _check_married_pattern(
+        self, seg: SegmentVerification, result: DClassResult
+    ) -> Optional[str]:
+        """Detect married segment patterns from ExpertFlyer results.
+
+        If a carrier has a known hub and nonstop has 0 seats but
+        connecting flights have seats > 0, flag as likely married.
+        """
+        carrier = seg.carrier
+        if not carrier or carrier not in _MARRIED_CHECK_HUBS:
+            return None
+        hub = _MARRIED_CHECK_HUBS[carrier]
+        # Skip if either endpoint IS the hub (not married in that case)
+        if seg.origin == hub or seg.destination == hub:
+            return None
+        # Check: nonstop has 0 seats but connections have seats
+        nonstop_seats = result.nonstop_seats
+        connecting_with_seats = [
+            f for f in result.flights if f.stops > 0 and f.seats > 0
+        ]
+        if nonstop_seats == 0 and connecting_with_seats:
+            return (
+                f"{result.booking_class}-class only via connection "
+                f"(likely married through {hub})"
+            )
+        return None
 
     def verify_option(
         self,
@@ -174,6 +207,10 @@ class DClassVerifier:
                     dclass.booking_class = seg_bc
                     verified.dclass = dclass
                     self._store_cache(seg, dclass)
+                    # Check for married segment pattern
+                    verified.married_segment_note = self._check_married_pattern(
+                        seg, dclass
+                    )
                 else:
                     verified.dclass = DClassResult(
                         status=DClassStatus.UNKNOWN,

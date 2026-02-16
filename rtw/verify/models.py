@@ -135,6 +135,7 @@ class SegmentVerification(BaseModel):
     flight_number: Optional[str] = None
     target_date: Optional[datetime.date] = None
     dclass: Optional[DClassResult] = None
+    married_segment_note: Optional[str] = None
 
 
 class VerifyOption(BaseModel):
