@@ -105,27 +105,47 @@ class DClassVerifier:
     def _check_married_pattern(
         self, seg: SegmentVerification, result: DClassResult
     ) -> Optional[str]:
-        """Detect married segment patterns from ExpertFlyer results.
+        """Detect married segment patterns and hub O&D control risks.
 
-        If a carrier has a known hub and nonstop has 0 seats but
-        connecting flights have seats > 0, flag as likely married.
+        Checks two patterns:
+        1. If nonstop has 0 seats but connections have seats (classic MSC)
+        2. If segment terminates at or transits through a carrier's hub
+           where O&D control may make EF results misleading
+
+        ExpertFlyer queries leg-level (AVS) availability which cannot
+        reflect O&D-based inventory restrictions applied at sell time.
+        D-class showing on EF does NOT guarantee bookability on RTW fares.
         """
         carrier = seg.carrier
         if not carrier or carrier not in _MARRIED_CHECK_HUBS:
             return None
         hub = _MARRIED_CHECK_HUBS[carrier]
-        # Skip if either endpoint IS the hub (not married in that case)
-        if seg.origin == hub or seg.destination == hub:
+
+        # Pattern 1: Neither endpoint is the hub — check nonstop vs connection
+        if seg.origin != hub and seg.destination != hub:
+            nonstop_seats = result.nonstop_seats
+            connecting_with_seats = [
+                f for f in result.flights if f.stops > 0 and f.seats > 0
+            ]
+            if nonstop_seats == 0 and connecting_with_seats:
+                return (
+                    f"{result.booking_class}-class only via connection "
+                    f"(likely married through {hub})"
+                )
             return None
-        # Check: nonstop has 0 seats but connections have seats
-        nonstop_seats = result.nonstop_seats
-        connecting_with_seats = [
-            f for f in result.flights if f.stops > 0 and f.seats > 0
-        ]
-        if nonstop_seats == 0 and connecting_with_seats:
+
+        # Pattern 2: Segment touches the hub — O&D control warning
+        # EF shows leg-level availability but the airline may block
+        # standalone D-class at the hub for RTW fares
+        if result.seats > 0:
+            carrier_name = "Cathay Pacific" if carrier == "CX" else "Qatar Airways"
             return (
-                f"{result.booking_class}-class only via connection "
-                f"(likely married through {hub})"
+                f"O&D control: {carrier_name} uses origin-destination revenue "
+                f"management at {hub}. EF shows {result.booking_class}"
+                f"{result.seats} but D-class may be unbookable standalone "
+                f"on RTW fares. Present to agent as connected routing "
+                f"(e.g., {seg.origin}-[next city] via {hub}) rather than "
+                f"standalone {seg.origin}-{seg.destination}."
             )
         return None
 

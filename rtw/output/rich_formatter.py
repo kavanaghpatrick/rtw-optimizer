@@ -61,52 +61,78 @@ class RichFormatter:
         else:
             status_text = Text("FAIL", style="bold red")
 
-        summary_lines = [
-            f"Ticket:     {ticket.type.value} ({ticket.cabin.value.title()}) from {ticket.origin}",
-            f"Passengers: {ticket.passengers}",
-            f"Segments:   {len(report.itinerary.flown_segments)} flown, "
-            f"{len(report.itinerary.surface_segments)} surface",
-            f"Rules:      {passed}/{total} passed",
-            f"Violations: {violations}",
-            f"Warnings:   {warnings}",
-        ]
-
         summary_text = Text()
-        summary_text.append("Status: ")
+        summary_text.append("Status:     ")
         summary_text.append_text(status_text)
-        summary_text.append("\n")
-        for line in summary_lines:
-            summary_text.append(line + "\n")
+        summary_text.append(f"\nTicket:     {ticket.type.value} ({ticket.cabin.value.title()}) from {ticket.origin}")
+        summary_text.append(f"\nPassengers: {ticket.passengers}")
+        summary_text.append(
+            f"\nSegments:   {len(report.itinerary.flown_segments)} flown, "
+            f"{len(report.itinerary.surface_segments)} surface"
+        )
+        summary_text.append(f"\nRules:      {passed}/{total} passed")
+        if violations:
+            summary_text.append(f"\nViolations: ")
+            summary_text.append(str(violations), style="bold red")
+        else:
+            summary_text.append(f"\nViolations: {violations}")
+        if warnings:
+            summary_text.append(f"\nWarnings:   ")
+            summary_text.append(str(warnings), style="yellow")
+        else:
+            summary_text.append(f"\nWarnings:   {warnings}")
 
         parts.append(_render(Panel(summary_text, title="Validation Summary", border_style="cyan")))
 
-        # Results table
-        table = Table(title="Rule Results", show_lines=True)
-        table.add_column("Rule", style="cyan", min_width=10)
-        table.add_column("Status", min_width=6)
-        table.add_column("Severity", min_width=9)
-        table.add_column("Message", min_width=30)
-        table.add_column("Fix", min_width=20)
+        # Split results into issues and passes
+        issues = [r for r in report.results if not r.passed]
+        passes = [r for r in report.results if r.passed and r.severity != Severity.INFO]
+        infos = [r for r in report.results if r.passed and r.severity == Severity.INFO]
 
-        for r in report.results:
-            if r.passed:
-                status = Text("PASS", style="green")
-            else:
-                status = Text("FAIL", style=_SEVERITY_STYLES.get(r.severity, "red"))
+        # Issues table (violations + warnings)
+        if issues:
+            issue_table = Table(title="Issues", show_lines=True, border_style="red")
+            issue_table.add_column("#", style="dim", justify="right", width=3)
+            issue_table.add_column("Severity", width=9)
+            issue_table.add_column("Rule", style="cyan", max_width=30)
+            issue_table.add_column("Detail", ratio=1)
 
-            severity = Text(r.severity.value.upper(), style=_SEVERITY_STYLES.get(r.severity, ""))
+            for i, r in enumerate(issues, 1):
+                sev_style = _SEVERITY_STYLES.get(r.severity, "red")
+                sev_text = Text(r.severity.value.upper(), style=sev_style)
+                detail = Text(r.message)
+                if r.fix_suggestion:
+                    detail.append(f"\nFix: {r.fix_suggestion}", style="dim")
+                if r.rule_reference:
+                    detail.append(f"  [{r.rule_reference}]", style="dim")
 
-            fix = r.fix_suggestion if not r.passed and r.fix_suggestion else ""
+                issue_table.add_row(str(i), sev_text, r.rule_name, detail)
 
-            table.add_row(
-                r.rule_name,
-                status,
-                severity,
-                r.message,
-                fix,
-            )
+            parts.append(_render(issue_table))
 
-        parts.append(_render(table))
+        # Passed rules table (compact)
+        if passes:
+            pass_table = Table(title="Passed Rules", show_lines=False, border_style="green", padding=(0, 1))
+            pass_table.add_column("Rule", style="cyan", max_width=35)
+            pass_table.add_column(Text("Status", style="green"), width=4, justify="center")
+            pass_table.add_column("Detail", ratio=1)
+
+            for r in passes:
+                pass_table.add_row(r.rule_name, Text("OK", style="green"), r.message)
+
+            parts.append(_render(pass_table))
+
+        # Info notes (collapsed)
+        if infos:
+            info_table = Table(title="Info", show_lines=False, border_style="blue", padding=(0, 1))
+            info_table.add_column("Rule", style="cyan", max_width=35)
+            info_table.add_column("Detail", ratio=1, style="dim")
+
+            for r in infos:
+                info_table.add_row(r.rule_name, r.message)
+
+            parts.append(_render(info_table))
+
         return "\n".join(parts)
 
     def format_ntp(self, estimates: list[NTPEstimate]) -> str:

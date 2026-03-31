@@ -239,10 +239,11 @@ class TestRichFormatter:
         assert "DONE4" in out
         assert "CAI" in out
 
-    def test_validation_shows_pass_fail(self, fmt, validation_report):
+    def test_validation_shows_status_and_issues(self, fmt, validation_report):
         out = fmt.format_validation(validation_report)
-        assert "PASS" in out
-        assert "FAIL" in out
+        assert "PASS" in out  # Summary status (no violations)
+        assert "Issues" in out  # Issues section for warnings/infos
+        assert "WARNING" in out  # Severity tag for R004
 
     def test_validation_shows_fix_suggestion(self, fmt, validation_report):
         out = fmt.format_validation(validation_report)

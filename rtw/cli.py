@@ -54,10 +54,17 @@ login_app = typer.Typer(
     no_args_is_help=True,
 )
 
+kb_app = typer.Typer(
+    name="kb",
+    help="Query the RTW travel intelligence knowledge base.",
+    no_args_is_help=True,
+)
+
 app.add_typer(scrape_app, name="scrape")
 app.add_typer(config_app, name="config")
 app.add_typer(cache_app, name="cache")
 app.add_typer(login_app, name="login")
+app.add_typer(kb_app, name="kb")
 
 
 # ---------------------------------------------------------------------------
@@ -2133,6 +2140,765 @@ def scan_dates(
         typer.echo(f"\n{nonstop_dates}/{total_checked} dates have nonstop {booking_class}-class. Best: {best_ns_date} {booking_class}{best_ns_seats}")
     else:
         typer.echo(f"\n0/{total_checked} dates have nonstop {booking_class}-class.")
+
+
+# ---------------------------------------------------------------------------
+# KB commands
+# ---------------------------------------------------------------------------
+
+
+def _kb_error(message: str) -> None:
+    """Print a KB error and exit."""
+    _error_panel(message)
+    raise typer.Exit(code=1)
+
+
+def _open_kb(db_path: Optional[str] = None):
+    """Open the KnowledgeBase, handling missing DB gracefully."""
+    from rtw.kb import KnowledgeBase, KnowledgeBaseError
+
+    path = Path(db_path) if db_path else None
+    try:
+        return KnowledgeBase(db_path=path)
+    except KnowledgeBaseError as exc:
+        _kb_error(str(exc))
+
+
+def _score_bar(score: float, width: int = 10) -> str:
+    """Render a score as a text bar for plain output."""
+    filled = int(round(score * width / 10))
+    return "#" * filled + "-" * (width - filled)
+
+
+def _display_kb_results(
+    results: list,
+    fmt: str,
+    *,
+    verbose: bool = False,
+    query: str = "",
+) -> None:
+    """Display SearchResult list in rich/plain/json format."""
+    import json as json_mod
+
+    if fmt == "json":
+        output = {
+            "query": query,
+            "result_count": len(results),
+            "results": [r.to_dict() for r in results],
+        }
+        typer.echo(json_mod.dumps(output, indent=2))
+        return
+
+    if not results:
+        typer.echo("  No results found.")
+        return
+
+    if fmt == "rich":
+        try:
+            from rich.console import Console
+            from rich.table import Table
+
+            console = Console()
+            table = Table(
+                title=f"KB Results ({len(results)} found)",
+                show_lines=False,
+            )
+            table.add_column("#", justify="right", style="dim", width=3)
+            table.add_column("Score", justify="right", width=5)
+            table.add_column("Source", style="cyan", max_width=30)
+            table.add_column("Heading", max_width=50)
+
+            for i, r in enumerate(results, 1):
+                score_str = f"{r.score:.1f}"
+                if r.score >= 8:
+                    score_str = f"[bold green]{score_str}[/]"
+                elif r.score >= 6:
+                    score_str = f"[green]{score_str}[/]"
+                elif r.score >= 4:
+                    score_str = f"[yellow]{score_str}[/]"
+                else:
+                    score_str = f"[dim]{score_str}[/]"
+
+                table.add_row(
+                    str(i),
+                    score_str,
+                    r.article_slug,
+                    r.heading or r.section or "(untitled)",
+                )
+
+            console.print(table)
+
+            # Show body previews
+            if verbose:
+                console.print()
+                for i, r in enumerate(results, 1):
+                    body_preview = r.body[:400].strip()
+                    if len(r.body) > 400:
+                        body_preview += "..."
+                    console.print(
+                        f"[dim][{i}][/] {body_preview}"
+                    )
+                    if r.source_refs:
+                        refs = ", ".join(r.source_refs[:3])
+                        console.print(f"    [dim]Sources: {refs}[/]")
+                    console.print()
+            else:
+                # Show brief snippets for top 3
+                console.print()
+                for i, r in enumerate(results[:3], 1):
+                    body_preview = r.body[:200].strip()
+                    if len(r.body) > 200:
+                        body_preview += "..."
+                    console.print(f"[dim][{i}][/] {body_preview}")
+                    console.print()
+
+            return
+        except ImportError:
+            pass  # Fall through to plain
+
+    # Plain text output
+    for i, r in enumerate(results, 1):
+        score_bar = _score_bar(r.score)
+        typer.echo(
+            f"  {i:>2}. [{score_bar}] {r.score:.1f}  "
+            f"{r.article_slug} / {r.heading or r.section or '(untitled)'}"
+        )
+        if verbose:
+            body_preview = r.body[:300].strip()
+            if len(r.body) > 300:
+                body_preview += "..."
+            typer.echo(f"      {body_preview}")
+            if r.source_refs:
+                typer.echo(f"      Sources: {', '.join(r.source_refs[:3])}")
+            typer.echo()
+
+
+def _display_facts(facts: list, fmt: str) -> None:
+    """Display Fact list in rich/plain/json format."""
+    import json as json_mod
+
+    if fmt == "json":
+        typer.echo(json_mod.dumps([f.to_dict() for f in facts], indent=2))
+        return
+
+    if not facts:
+        typer.echo("  No facts found.")
+        return
+
+    if fmt == "rich":
+        try:
+            from rich.console import Console
+            from rich.table import Table
+
+            console = Console()
+            table = Table(title=f"Facts ({len(facts)} found)", show_lines=True)
+            table.add_column("Subject", style="bold")
+            table.add_column("Predicate", style="cyan")
+            table.add_column("Value", style="green")
+            table.add_column("Conf.", justify="right", width=5)
+            table.add_column("Article", style="dim")
+
+            for f in facts:
+                conf_str = f"{f.confidence:.0%}" if f.confidence else "?"
+                table.add_row(
+                    f.subject, f.predicate, f.value, conf_str, f.article_slug
+                )
+
+            console.print(table)
+
+            # Show source quotes for high-confidence facts
+            for f in facts:
+                if f.source_quote:
+                    console.print(
+                        f"  [dim]{f.subject}/{f.predicate}: "
+                        f"\"{f.source_quote[:200]}\"[/]"
+                    )
+
+            return
+        except ImportError:
+            pass
+
+    # Plain text
+    for f in facts:
+        conf = f"{f.confidence:.0%}" if f.confidence else "?"
+        typer.echo(
+            f"  {f.subject:<12} {f.predicate:<25} {f.value:<30} "
+            f"[{conf}] ({f.article_slug})"
+        )
+        if f.source_quote:
+            quote = f.source_quote[:150]
+            if len(f.source_quote) > 150:
+                quote += "..."
+            typer.echo(f"    \"{quote}\"")
+
+
+def _display_stale(articles: list[dict], fmt: str) -> None:
+    """Display stale articles in rich/plain/json format."""
+    import json as json_mod
+
+    if fmt == "json":
+        typer.echo(json_mod.dumps(articles, indent=2))
+        return
+
+    if not articles:
+        typer.echo("  All articles are fresh.")
+        return
+
+    if fmt == "rich":
+        try:
+            from rich.console import Console
+            from rich.table import Table
+
+            console = Console()
+            table = Table(
+                title=f"Stale Articles ({len(articles)} found)", show_lines=False
+            )
+            table.add_column("Article", style="bold")
+            table.add_column("Title")
+            table.add_column("Source Date", style="cyan")
+            table.add_column("Age (days)", justify="right")
+
+            for a in articles:
+                age = f"{a['age_days']:.0f}" if a.get("age_days") else "unknown"
+                date_str = a.get("source_date") or "none"
+                table.add_row(a["slug"], a["title"], date_str, age)
+
+            console.print(table)
+            return
+        except ImportError:
+            pass
+
+    # Plain text
+    for a in articles:
+        age = f"{a['age_days']:.0f}d" if a.get("age_days") else "unknown"
+        date_str = a.get("source_date") or "none"
+        typer.echo(f"  {a['slug']:<35} {date_str:<12} {age:>8}  {a['title']}")
+
+
+def _display_stats(stats_data: dict, fmt: str) -> None:
+    """Display KB stats in rich/plain/json format."""
+    import json as json_mod
+
+    if fmt == "json":
+        typer.echo(json_mod.dumps(stats_data, indent=2))
+        return
+
+    if fmt == "rich":
+        try:
+            from rich.console import Console
+            from rich.table import Table
+
+            console = Console()
+            table = Table(title="Knowledge Base Statistics", show_lines=False)
+            table.add_column("Metric", style="bold")
+            table.add_column("Value", justify="right", style="green")
+
+            display_names = {
+                "articles": "Articles",
+                "chunks": "Chunks (searchable units)",
+                "facts": "Structured facts",
+                "sources": "Source references",
+                "carriers_tracked": "Carriers tracked",
+                "topics": "Topics",
+                "fresh_articles": "Fresh articles (<=90d)",
+                "stale_articles": "Stale articles (>90d)",
+                "oldest_article": "Oldest article",
+                "newest_article": "Newest article",
+            }
+
+            for key, label in display_names.items():
+                if key in stats_data:
+                    val = stats_data[key]
+                    table.add_row(label, str(val) if val is not None else "-")
+
+            console.print(table)
+            return
+        except ImportError:
+            pass
+
+    # Plain text
+    typer.echo("  Knowledge Base Statistics")
+    typer.echo("  " + "-" * 40)
+    for key, val in stats_data.items():
+        label = key.replace("_", " ").title()
+        typer.echo(f"  {label:<30} {val}")
+
+
+def _display_related(items: list, fmt: str) -> None:
+    """Display RelatedItem list in rich/plain/json format."""
+    import json as json_mod
+
+    if fmt == "json":
+        typer.echo(json_mod.dumps([i.to_dict() for i in items], indent=2))
+        return
+
+    if not items:
+        typer.echo("  No related content found.")
+        return
+
+    if fmt == "rich":
+        try:
+            from rich.console import Console
+            from rich.table import Table
+
+            console = Console()
+            table = Table(
+                title=f"Related Content ({len(items)} found)", show_lines=False
+            )
+            table.add_column("#", justify="right", style="dim", width=3)
+            table.add_column("Strength", justify="right", width=8)
+            table.add_column("Relation", style="cyan", width=14)
+            table.add_column("Heading", max_width=50)
+
+            for i, item in enumerate(items, 1):
+                strength = f"{item.strength:.0%}"
+                table.add_row(str(i), strength, item.relation, item.heading or "(untitled)")
+
+            console.print(table)
+
+            # Show previews
+            console.print()
+            for i, item in enumerate(items[:5], 1):
+                console.print(f"  [dim][{i}][/] {item.body_preview}")
+                console.print()
+
+            return
+        except ImportError:
+            pass
+
+    # Plain text
+    for i, item in enumerate(items, 1):
+        typer.echo(
+            f"  {i:>2}. [{item.strength:.0%}] {item.relation:<14} "
+            f"{item.heading or '(untitled)'}"
+        )
+        typer.echo(f"      {item.body_preview[:200]}")
+
+
+# --- KB Subcommands ---
+
+
+@kb_app.command(name="search")
+def kb_search(
+    query: Annotated[str, typer.Argument(help="Natural language search query")],
+    carrier: Annotated[
+        Optional[str],
+        typer.Option("--carrier", "-c", help="Filter by carrier code"),
+    ] = None,
+    topic: Annotated[
+        Optional[str],
+        typer.Option("--topic", "-t", help="Filter by topic"),
+    ] = None,
+    limit: Annotated[
+        int, typer.Option("--limit", "-n", help="Max results")
+    ] = 10,
+    json_out: JsonFlag = False,
+    plain: PlainFlag = False,
+    verbose: VerboseFlag = False,
+) -> None:
+    """Search the knowledge base with natural language."""
+    kb = _open_kb()
+    with kb:
+        results = kb.search(query, carrier=carrier, topic=topic, limit=limit)
+        fmt = _get_format(json_out, plain)
+        _display_kb_results(results, fmt, verbose=verbose, query=query)
+
+
+@kb_app.command(name="carrier")
+def kb_carrier(
+    code: Annotated[str, typer.Argument(help="2-letter IATA carrier code")],
+    context: Annotated[
+        Optional[str],
+        typer.Option("--context", help="Filter: yq, msc, availability, booking"),
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", "-n")] = 20,
+    json_out: JsonFlag = False,
+    plain: PlainFlag = False,
+    verbose: VerboseFlag = False,
+) -> None:
+    """Show all knowledge about a specific carrier."""
+    kb = _open_kb()
+    with kb:
+        results = kb.carrier_lookup(code, context=context, limit=limit)
+        fmt = _get_format(json_out, plain)
+        _display_kb_results(results, fmt, verbose=verbose, query=code)
+
+
+@kb_app.command(name="lookup")
+def kb_lookup(
+    subject: Annotated[
+        str, typer.Argument(help="Subject to look up (carrier, route, rule)")
+    ],
+    predicate: Annotated[
+        Optional[str],
+        typer.Argument(help="Predicate to narrow (yq, rate, etc.)"),
+    ] = None,
+    json_out: JsonFlag = False,
+    plain: PlainFlag = False,
+) -> None:
+    """Look up structured facts. Example: rtw kb lookup BA yq"""
+    kb = _open_kb()
+    with kb:
+        facts = kb.fact_lookup(subject, predicate)
+        fmt = _get_format(json_out, plain)
+        _display_facts(facts, fmt)
+
+
+@kb_app.command(name="ask")
+def kb_ask(
+    question: Annotated[str, typer.Argument(help="Natural language question")],
+    limit: Annotated[int, typer.Option("--limit", "-n")] = 5,
+    json_out: JsonFlag = False,
+    plain: PlainFlag = False,
+    verbose: VerboseFlag = False,
+) -> None:
+    """Answer a question using the knowledge base."""
+    kb = _open_kb()
+    with kb:
+        results = kb.answer(question, limit=limit)
+        fmt = _get_format(json_out, plain)
+        _display_kb_results(results, fmt, verbose=verbose, query=question)
+
+
+@kb_app.command(name="related")
+def kb_related(
+    chunk_id: Annotated[
+        int, typer.Argument(help="Chunk ID to find related content for")
+    ],
+    limit: Annotated[int, typer.Option("--limit", "-n")] = 10,
+    json_out: JsonFlag = False,
+    plain: PlainFlag = False,
+) -> None:
+    """Find content related to a specific chunk."""
+    kb = _open_kb()
+    with kb:
+        items = kb.related(chunk_id, limit=limit)
+        fmt = _get_format(json_out, plain)
+        _display_related(items, fmt)
+
+
+@kb_app.command(name="stale")
+def kb_stale(
+    days: Annotated[
+        int, typer.Option("--days", "-d", help="Max age in days")
+    ] = 90,
+    json_out: JsonFlag = False,
+    plain: PlainFlag = False,
+) -> None:
+    """Find stale knowledge older than a threshold."""
+    kb = _open_kb()
+    with kb:
+        articles = kb.stale_articles(max_age_days=days)
+        fmt = _get_format(json_out, plain)
+        _display_stale(articles, fmt)
+
+
+@kb_app.command(name="stats")
+def kb_stats(
+    json_out: JsonFlag = False,
+    plain: PlainFlag = False,
+) -> None:
+    """Show knowledge base statistics."""
+    kb = _open_kb()
+    with kb:
+        data = kb.stats()
+        fmt = _get_format(json_out, plain)
+        _display_stats(data, fmt)
+
+
+@kb_app.command(name="brief")
+def kb_brief(
+    origin: Annotated[
+        Optional[str],
+        typer.Option("--origin", "-o", help="Origin airport code"),
+    ] = None,
+    ticket: Annotated[
+        Optional[str],
+        typer.Option("--ticket", "-t", help="Ticket type (DONE3, DONE4, etc.)"),
+    ] = None,
+    carrier_codes: Annotated[
+        Optional[list[str]],
+        typer.Option("--carrier", "-c", help="Carrier codes"),
+    ] = None,
+    city: Annotated[
+        Optional[list[str]],
+        typer.Option("--city", help="Cities on route"),
+    ] = None,
+    json_out: JsonFlag = False,
+    plain: PlainFlag = False,
+) -> None:
+    """Contextual briefing for a specific booking scenario."""
+    kb = _open_kb()
+    with kb:
+        results = kb.context_brief(
+            origin=origin,
+            ticket_type=ticket,
+            carriers=carrier_codes,
+            cities=city,
+        )
+        fmt = _get_format(json_out, plain)
+        _display_kb_results(results, fmt, verbose=True, query="brief")
+
+
+@kb_app.command(name="topic")
+def kb_topic(
+    name: Annotated[str, typer.Argument(help="Topic name or partial match")],
+    limit: Annotated[int, typer.Option("--limit", "-n")] = 15,
+    json_out: JsonFlag = False,
+    plain: PlainFlag = False,
+    verbose: VerboseFlag = False,
+) -> None:
+    """Show everything on a topic."""
+    kb = _open_kb()
+    with kb:
+        results = kb.topic_search(name, limit=limit)
+        fmt = _get_format(json_out, plain)
+        _display_kb_results(results, fmt, verbose=verbose, query=name)
+
+
+@kb_app.command(name="list")
+def kb_list(
+    json_out: JsonFlag = False,
+    plain: PlainFlag = False,
+) -> None:
+    """List all articles in the knowledge base."""
+    import json as json_mod
+
+    kb = _open_kb()
+    with kb:
+        articles = kb.list_articles()
+        fmt = _get_format(json_out, plain)
+
+        if fmt == "json":
+            typer.echo(json_mod.dumps(articles, indent=2))
+            return
+
+        if not articles:
+            typer.echo("  No articles in the knowledge base.")
+            return
+
+        if fmt == "rich":
+            try:
+                from rich.console import Console
+                from rich.table import Table
+
+                console = Console()
+                table = Table(
+                    title=f"KB Articles ({len(articles)})", show_lines=False
+                )
+                table.add_column("Article", style="bold")
+                table.add_column("Title")
+                table.add_column("Category", style="cyan")
+                table.add_column("Words", justify="right")
+                table.add_column("Sections", justify="right")
+                table.add_column("Findings", justify="right")
+
+                for a in articles:
+                    table.add_row(
+                        a["slug"],
+                        a["title"],
+                        a.get("category") or "-",
+                        str(a.get("word_count") or "-"),
+                        str(a.get("section_count", 0)),
+                        str(a.get("finding_count", 0)),
+                    )
+                console.print(table)
+                return
+            except ImportError:
+                pass
+
+        # Plain text
+        for a in articles:
+            typer.echo(
+                f"  {a['slug']:<35} {a.get('category') or '-':<14} "
+                f"{a.get('word_count') or '-':>6} words  "
+                f"{a.get('section_count', 0):>3} sections  "
+                f"{a.get('finding_count', 0):>3} findings  "
+                f"{a['title']}"
+            )
+
+
+@kb_app.command(name="carriers")
+def kb_carriers(
+    json_out: JsonFlag = False,
+    plain: PlainFlag = False,
+) -> None:
+    """List all carriers with mention counts."""
+    import json as json_mod
+
+    kb = _open_kb()
+    with kb:
+        carrier_list = kb.list_carriers()
+        fmt = _get_format(json_out, plain)
+
+        if fmt == "json":
+            typer.echo(json_mod.dumps(carrier_list, indent=2))
+            return
+
+        if not carrier_list:
+            typer.echo("  No carrier data found.")
+            return
+
+        if fmt == "rich":
+            try:
+                from rich.console import Console
+                from rich.table import Table
+
+                console = Console()
+                table = Table(title="Carrier Mentions", show_lines=False)
+                table.add_column("Carrier", style="bold")
+                table.add_column("Total", justify="right")
+                table.add_column("YQ", justify="right")
+                table.add_column("MSC", justify="right")
+                table.add_column("Avail.", justify="right")
+                table.add_column("Warnings", justify="right", style="red")
+
+                for c in carrier_list:
+                    table.add_row(
+                        c["carrier"],
+                        str(c["total_mentions"]),
+                        str(c.get("yq_mentions", 0)),
+                        str(c.get("msc_mentions", 0)),
+                        str(c.get("avail_mentions", 0)),
+                        str(c.get("warnings", 0)),
+                    )
+                console.print(table)
+                return
+            except ImportError:
+                pass
+
+        # Plain text
+        typer.echo(
+            f"  {'Carrier':<10} {'Total':>6} {'YQ':>5} {'MSC':>5} "
+            f"{'Avail':>6} {'Warn':>5}"
+        )
+        typer.echo("  " + "-" * 42)
+        for c in carrier_list:
+            typer.echo(
+                f"  {c['carrier']:<10} {c['total_mentions']:>6} "
+                f"{c.get('yq_mentions', 0):>5} {c.get('msc_mentions', 0):>5} "
+                f"{c.get('avail_mentions', 0):>6} {c.get('warnings', 0):>5}"
+            )
+
+
+@kb_app.command(name="topics")
+def kb_topics(
+    json_out: JsonFlag = False,
+    plain: PlainFlag = False,
+) -> None:
+    """List all topics."""
+    import json as json_mod
+
+    kb = _open_kb()
+    with kb:
+        topic_list = kb.list_topics()
+        fmt = _get_format(json_out, plain)
+
+        if fmt == "json":
+            typer.echo(json_mod.dumps(topic_list, indent=2))
+            return
+
+        if not topic_list:
+            typer.echo("  No topics found.")
+            return
+
+        if fmt == "rich":
+            try:
+                from rich.console import Console
+                from rich.table import Table
+
+                console = Console()
+                table = Table(title="KB Topics", show_lines=False)
+                table.add_column("Topic", style="bold")
+                table.add_column("Display Name")
+                table.add_column("Chunks", justify="right")
+                table.add_column("Description", max_width=40)
+
+                for t in topic_list:
+                    table.add_row(
+                        t["name"],
+                        t.get("display") or "",
+                        str(t.get("chunk_count", 0)),
+                        t.get("description") or "",
+                    )
+                console.print(table)
+                return
+            except ImportError:
+                pass
+
+        # Plain text
+        for t in topic_list:
+            typer.echo(
+                f"  {t['name']:<30} {t.get('chunk_count', 0):>4} chunks  "
+                f"{t.get('display') or ''}"
+            )
+
+
+@kb_app.command(name="sources")
+def kb_sources(
+    source_type: Annotated[
+        Optional[str],
+        typer.Option("--type", help="flyertalk_thread, document, web"),
+    ] = None,
+    article: Annotated[
+        Optional[str], typer.Option("--article", help="Article slug")
+    ] = None,
+    json_out: JsonFlag = False,
+    plain: PlainFlag = False,
+) -> None:
+    """List knowledge base sources."""
+    import json as json_mod
+
+    kb = _open_kb()
+    with kb:
+        srcs = kb.get_sources(source_type=source_type, article_slug=article)
+        fmt = _get_format(json_out, plain)
+
+        if fmt == "json":
+            typer.echo(json_mod.dumps(srcs, indent=2))
+            return
+
+        if not srcs:
+            typer.echo("  No sources found.")
+            return
+
+        if fmt == "rich":
+            try:
+                from rich.console import Console
+                from rich.table import Table
+
+                console = Console()
+                table = Table(
+                    title=f"KB Sources ({len(srcs)})", show_lines=False
+                )
+                table.add_column("Type", style="cyan")
+                table.add_column("Reference")
+                table.add_column("Title")
+                table.add_column("Date", style="dim")
+
+                for s in srcs:
+                    table.add_row(
+                        s.get("source_type", ""),
+                        s.get("reference", ""),
+                        s.get("title") or "",
+                        s.get("date") or "-",
+                    )
+                console.print(table)
+                return
+            except ImportError:
+                pass
+
+        # Plain text
+        for s in srcs:
+            typer.echo(
+                f"  [{s.get('source_type', '')}] "
+                f"{s.get('title') or s.get('reference', '')}  "
+                f"{s.get('date') or ''}"
+            )
+
+
+# Also expose get_sources on KnowledgeBase for programmatic use
+# (already defined in the class -- the CLI wrapper above calls it)
 
 
 # ---------------------------------------------------------------------------

@@ -68,6 +68,13 @@ class SessionExpiredError(ScrapeError):
         super().__init__(message, error_type="SESSION_EXPIRED")
 
 
+class RateLimitError(ScrapeError):
+    """ExpertFlyer rate limit exceeded."""
+
+    def __init__(self, message: str = "ExpertFlyer rate limit exceeded") -> None:
+        super().__init__(message, error_type="RATE_LIMITED")
+
+
 def _get_credentials() -> tuple[str, str] | None:
     """Retrieve ExpertFlyer credentials from macOS Keychain."""
     try:
@@ -256,6 +263,17 @@ class ExpertFlyerScraper:
             self._logged_in = False
             raise SessionExpiredError()
 
+    def _check_rate_limited(self, page) -> None:
+        """Raise RateLimitError if ExpertFlyer returns rate limit page."""
+        try:
+            body_text = page.evaluate("() => document.body?.innerText || ''")
+            if "Rate Limit Exceeded" in body_text:
+                raise RateLimitError()
+        except RateLimitError:
+            raise
+        except Exception:
+            pass
+
     def _build_results_url(
         self,
         origin: str,
@@ -349,6 +367,19 @@ class ExpertFlyerScraper:
                     self._logged_in = False
                     continue
                 raise
+            except RateLimitError as exc:
+                last_error = exc
+                # Rate limited — use much longer backoff (60s base)
+                wait = 60 * attempt
+                logger.warning(
+                    "ExpertFlyer RATE LIMITED (attempt %d/%d). "
+                    "Waiting %ds before retry...",
+                    attempt,
+                    _MAX_RETRIES,
+                    wait,
+                )
+                if attempt < _MAX_RETRIES:
+                    time.sleep(wait)
             except ScrapeError as exc:
                 last_error = exc
                 if attempt < _MAX_RETRIES:
@@ -398,9 +429,10 @@ class ExpertFlyerScraper:
         logger.info("ExpertFlyer: fetching %s→%s on %s", origin, dest, date)
         page.goto(url, timeout=_PAGE_LOAD_TIMEOUT)
 
-        # Wait for table or detect session expiry
+        # Wait for table or detect session expiry / rate limit
         time.sleep(2)
         self._check_session_expired(page)
+        self._check_rate_limited(page)
 
         # Wait for results table
         try:
@@ -409,8 +441,9 @@ class ExpertFlyerScraper:
                 timeout=_RESULTS_TIMEOUT,
             )
         except Exception:
-            # Check if session expired during load
+            # Check if session expired or rate limited during load
             self._check_session_expired(page)
+            self._check_rate_limited(page)
             raise ScrapeError(
                 f"Results table not found for {origin}→{dest}",
                 error_type="PARSE_ERROR",

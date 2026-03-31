@@ -28,8 +28,8 @@ origins:
 
   OSL:
     name: Oslo
-    currency: EUR
-    notes: "Norway filing advantage. Easy positioning from London."
+    currency: NOK
+    notes: "Norway filing advantage. Fares filed in NOK (weak currency). Easy positioning from London."
     fares:
       AONE3: 7700
       AONE4: 8600

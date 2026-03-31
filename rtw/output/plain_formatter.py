@@ -47,17 +47,28 @@ class PlainFormatter:
         lines.append(f"  Violations: {report.violation_count}")
         lines.append(f"  Warnings:   {report.warning_count}")
 
-        lines.append(_subheader("Rule Results"))
+        issues = [r for r in report.results if not r.passed]
+        passes = [r for r in report.results if r.passed and r.severity.value != "info"]
+        infos = [r for r in report.results if r.passed and r.severity.value == "info"]
 
-        # Column headers
-        lines.append(f"  {'Rule':<25} {'Status':<8} {'Severity':<12} Message")
-        lines.append(f"  {'-' * 25} {'-' * 8} {'-' * 12} {'-' * 40}")
+        if issues:
+            lines.append(_subheader("Issues"))
+            for i, r in enumerate(issues, 1):
+                tag = r.severity.value.upper()
+                lines.append(f"  {i}. [{tag}] {r.rule_name}")
+                lines.append(f"     {r.message}")
+                if r.fix_suggestion:
+                    lines.append(f"     Fix: {r.fix_suggestion}")
 
-        for r in report.results:
-            status_str = "PASS" if r.passed else "FAIL"
-            lines.append(f"  {r.rule_name:<25} {status_str:<8} {r.severity.value:<12} {r.message}")
-            if not r.passed and r.fix_suggestion:
-                lines.append(f"  {'':>25} {'':>8} {'':>12} Fix: {r.fix_suggestion}")
+        if passes:
+            lines.append(_subheader("Passed Rules"))
+            for r in passes:
+                lines.append(f"  OK  {r.rule_name:<35} {r.message}")
+
+        if infos:
+            lines.append(_subheader("Info"))
+            for r in infos:
+                lines.append(f"      {r.rule_name:<35} {r.message}")
 
         return "\n".join(lines)
 

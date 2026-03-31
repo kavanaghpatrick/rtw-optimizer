@@ -12,9 +12,13 @@ class MarriedSegmentRule:
     rule_name = "Married Segment Detection"
     rule_reference = "Community knowledge (FlyerTalk)"
 
-    # Carriers with known hub-connection married segment patterns
+    # Carriers with known hub O&D control patterns.
+    # These carriers use Origin-Destination revenue management to block D-class
+    # for standalone segments to/from their hub, while releasing it for
+    # connecting itineraries through the hub.
     _HUB_CARRIERS = {
-        "CX": ("HKG", "Cathay Pacific often requires HKG stopover for D-class availability"),
+        "CX": ("HKG", "Cathay Pacific uses O&D control at HKG — D-class may only be available for connecting itineraries through HKG, not standalone segments to/from HKG"),
+        "QR": ("DOH", "Qatar Airways uses aggressive O&D control at DOH — D-class may only be available for connecting itineraries through DOH"),
     }
 
     def check(self, itinerary, context) -> list[RuleResult]:

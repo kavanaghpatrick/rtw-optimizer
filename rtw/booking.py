@@ -217,15 +217,47 @@ class BookingGenerator:
                     f"reissue and may incur fees."
                 )
 
-            # --- CX hub-connection warning ---
-            if seg.carrier == "CX":
+            # --- Hub O&D control warnings ---
+            # Carriers using O&D revenue management at their hub may block
+            # standalone D-class on RTW fares. Present to agent as connected
+            # routing through the hub rather than standalone segments.
+            _OD_HUB_CARRIERS = {
+                "CX": "HKG",
+                "QR": "DOH",
+            }
+            if seg.carrier in _OD_HUB_CARRIERS:
+                hub = _OD_HUB_CARRIERS[seg.carrier]
                 from_apt = seg.from_airport
                 to_apt = seg.to_airport
-                if from_apt != "HKG" and to_apt != "HKG":
+                if from_apt != hub and to_apt != hub:
+                    # Segment doesn't touch hub — married through hub
                     warnings.append(
-                        f"CX {from_apt}-{to_apt}: D-class may be married through HKG. "
-                        f"Check standalone availability via ExpertFlyer."
+                        f"{seg.carrier} {from_apt}-{to_apt}: D-class may be married "
+                        f"through {hub}. Check standalone availability via ExpertFlyer."
                     )
+                elif to_apt == hub:
+                    # Segment terminates at hub — O&D control risk
+                    # Find the next flown segment to suggest connected routing
+                    next_city = None
+                    for j in range(i + 1, len(segments)):
+                        if not segments[j].is_surface:
+                            next_city = segments[j].to_airport
+                            break
+                    if next_city:
+                        warnings.append(
+                            f"O&D CONTROL: {seg.carrier} uses origin-destination revenue "
+                            f"management at {hub}. D-class on {from_apt}-{hub} may be "
+                            f"unbookable standalone on RTW fares. Present to agent as "
+                            f"connected routing: \"{from_apt} to {next_city} via {hub}\" "
+                            f"rather than standalone {from_apt}-{hub}."
+                        )
+                    else:
+                        warnings.append(
+                            f"O&D CONTROL: {seg.carrier} uses origin-destination revenue "
+                            f"management at {hub}. D-class on {from_apt}-{hub} may be "
+                            f"unbookable standalone on RTW fares. If possible, book with "
+                            f"an onward connection from {hub}."
+                        )
 
             # --- Build phone instruction ---
             date_str = seg.date.strftime("%d %b %Y") if seg.date else "date TBD"

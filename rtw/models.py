@@ -138,6 +138,7 @@ class Segment(BaseModel):
     flight: Optional[str] = None
     date: Optional[Date] = None
     type: SegmentType = SegmentType.STOPOVER
+    via: Optional[str | list[str]] = None
     notes: Optional[str] = None
 
     model_config = {"populate_by_name": True}
@@ -156,6 +157,25 @@ class Segment(BaseModel):
     @classmethod
     def uppercase_operating_carrier(cls, v: Optional[str]) -> Optional[str]:
         return v.upper() if isinstance(v, str) else v
+
+    @field_validator("via", mode="before")
+    @classmethod
+    def normalize_via(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return [v.upper()]
+        if isinstance(v, list):
+            return [x.upper() for x in v if isinstance(x, str)]
+        return v
+
+    @property
+    def has_via(self) -> bool:
+        return self.via is not None and len(self.via) > 0
+
+    @property
+    def via_airports(self) -> list[str]:
+        return self.via if self.via else []
 
     @property
     def is_surface(self) -> bool:
