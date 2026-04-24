@@ -60,11 +60,14 @@ kb_app = typer.Typer(
     no_args_is_help=True,
 )
 
+from rtw.area.cli import area_app  # noqa: E402
+
 app.add_typer(scrape_app, name="scrape")
 app.add_typer(config_app, name="config")
 app.add_typer(cache_app, name="cache")
 app.add_typer(login_app, name="login")
 app.add_typer(kb_app, name="kb")
+app.add_typer(area_app, name="area")
 
 
 # ---------------------------------------------------------------------------
