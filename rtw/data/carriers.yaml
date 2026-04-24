@@ -41,6 +41,16 @@ FJ:
   rtw_booking_class: D
   notes: "Joined oneworld April 2025. ATR-72 routes are single class."
 
+HA:
+  name: Hawaiian Airlines
+  alliance: oneworld
+  eligible: true
+  ntp_method: distance
+  yq_tier: low
+  yq_estimate_per_segment: 30
+  rtw_booking_class: D
+  notes: "Joined oneworld 2026-04-22 as 16th full member. HA IATA code retired same day; Hawaiian-operated flights now marketed under AS on single Alaska Air Group operating certificate. Booking class and YQ provisional until partner inventory stabilizes."
+
 QR:
   name: Qatar Airways
   alliance: oneworld

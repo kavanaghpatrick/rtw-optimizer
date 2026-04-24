@@ -108,6 +108,50 @@ class TestWYCarrier:
         assert wy.get("yq_estimate_per_segment") is not None
 
 
+class TestHACarrier:
+    """Hawaiian Airlines (HA) joined oneworld 2026-04-22 as 16th full member."""
+
+    def test_ha_is_eligible(self):
+        """HA should be eligible for oneworld Explorer post-2026-04-22."""
+        segs = [
+            {"from": "HNL", "to": "NRT", "carrier": "HA"},
+            {"from": "NRT", "to": "HNL", "carrier": "HA"},
+        ]
+        itin = _make_itinerary(segs, origin="HNL")
+        ctx = build_context(itin)
+        results = EligibleCarrierRule().check(itin, ctx)
+        assert all(r.passed for r in results), "HA should be eligible"
+
+    def test_ha_carrier_data_complete(self):
+        """HA should have all required carrier fields."""
+        import yaml
+        from pathlib import Path
+
+        carriers_path = Path(__file__).parent.parent.parent / "rtw" / "data" / "carriers.yaml"
+        with open(carriers_path) as f:
+            carriers = yaml.safe_load(f)
+        ha = carriers.get("HA", {})
+        assert ha.get("name") == "Hawaiian Airlines"
+        assert ha.get("alliance") == "oneworld"
+        assert ha.get("eligible") is True
+        assert ha.get("ntp_method") in ("distance", "revenue")
+        assert ha.get("rtw_booking_class") is not None
+        assert ha.get("yq_tier") is not None
+        assert ha.get("yq_estimate_per_segment") is not None
+
+    def test_ha_segment_in_mixed_itinerary_passes(self):
+        """Full oneworld itinerary that includes an HA-operated Pacific leg validates."""
+        segs = [
+            {"from": "LAX", "to": "HNL", "carrier": "HA"},
+            {"from": "HNL", "to": "SYD", "carrier": "HA"},
+            {"from": "SYD", "to": "LAX", "carrier": "QF"},
+        ]
+        itin = _make_itinerary(segs, origin="LAX", ticket_type="DONE3")
+        ctx = build_context(itin)
+        results = EligibleCarrierRule().check(itin, ctx)
+        assert all(r.passed for r in results), "HA mixed itinerary should pass eligibility"
+
+
 class TestS7Carrier:
     """S7 Airlines sanctions flag."""
 
