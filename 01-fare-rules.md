@@ -365,7 +365,7 @@ Intermediate surface sectors (landing at one airport, departing from another en 
 | Transit counts as continent visit | Even a 2-hour connection counts the continent for pricing |
 | No Premium Economy tier | PE is a per-segment surcharge on Economy |
 | 10-day minimum stay | Must be away at least 10 days |
-| D class on AA = H class | American Airlines uses H class (not D) for OWE business |
+| AA business = D (H is only fallback) | All carriers book business in **D**, including AA. H is AA's *fallback* class when D is sold out (other carriers fall back to B). See §13. |
 
 ---
 

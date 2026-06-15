@@ -24,9 +24,19 @@ def v3(v3_itinerary):
 class TestBookingClass:
     """Test _get_booking_class() for various carrier/cabin combos."""
 
-    def test_aa_business_is_h(self, generator):
-        """AA uses H class for business, not D."""
-        assert generator._get_booking_class("AA", CabinClass.BUSINESS) == "H"
+    def test_aa_business_is_d(self, generator):
+        """AA's primary business RBD is D like every carrier (H is fallback)."""
+        assert generator._get_booking_class("AA", CabinClass.BUSINESS) == "D"
+
+    def test_aa_fallback_is_h(self, generator):
+        """AA falls back to H when D is sold out; others fall back to B."""
+        assert generator._get_fallback_class("AA", CabinClass.BUSINESS) == "H"
+
+    def test_ba_fallback_is_b(self, generator):
+        assert generator._get_fallback_class("BA", CabinClass.BUSINESS) == "B"
+
+    def test_surface_fallback_is_none(self, generator):
+        assert generator._get_fallback_class(None, CabinClass.BUSINESS) is None
 
     def test_qr_business_is_d(self, generator):
         """Most carriers use D class for business."""
@@ -69,7 +79,7 @@ class TestBookingClass:
 
     def test_case_insensitive(self, generator):
         """Carrier code is case-insensitive."""
-        assert generator._get_booking_class("aa", CabinClass.BUSINESS) == "H"
+        assert generator._get_booking_class("aa", CabinClass.BUSINESS) == "D"
         assert generator._get_booking_class("qr", CabinClass.BUSINESS) == "D"
 
 
@@ -112,13 +122,15 @@ class TestPhoneScript:
         assert "SURFACE" in surface.phone_instruction
         assert "ground transport" in surface.phone_instruction
 
-    def test_aa_segments_use_h_class(self, generator, v3):
-        """AA segments should have booking class H."""
+    def test_aa_segments_use_d_class_with_h_fallback(self, generator, v3):
+        """AA segments book D (primary) with H as the fallback class."""
         scripts = generator._segment_scripts(v3)
         aa_scripts = [s for s in scripts if s.carrier == "AA"]
         assert len(aa_scripts) > 0
         for s in aa_scripts:
-            assert s.booking_class == "H"
+            assert s.booking_class == "D"
+            assert s.fallback_class == "H"
+            assert "fallback: H" in s.phone_instruction
 
     def test_fj_atr72_note(self, generator, v3):
         """FJ ATR-72 segment should have Y-class mapping note."""
@@ -321,10 +333,12 @@ class TestGDSCommands:
         commands = generator._gds_commands(v3)
         ss_commands = [c for c in commands if c.startswith("SS")]
         assert len(ss_commands) > 0
-        # AA segments should have H class
-        aa_cmds = [c for c in ss_commands if "AA" in c or "H1" in c]
+        # AA segments sell in D (primary), not H — H is only the fallback class
+        aa_cmds = [c for c in ss_commands if "AA" in c]
+        assert len(aa_cmds) > 0
         for cmd in aa_cmds:
-            assert "H1" in cmd
+            assert "D1" in cmd
+            assert "H1" not in cmd
 
     def test_gds_date_format(self, generator):
         """GDS dates format as DDMMM uppercase."""

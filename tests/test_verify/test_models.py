@@ -381,7 +381,11 @@ class TestDClassResultWithFlights:
 
 
 class TestBookingClassDisplay:
-    """Test display_code with different booking classes."""
+    """Test display_code with different booking classes.
+
+    H on AA is now the fallback class (D is primary), so these exercise
+    display_code rendering for a fallback-class result.
+    """
 
     def test_h_class_available(self):
         r = DClassResult(

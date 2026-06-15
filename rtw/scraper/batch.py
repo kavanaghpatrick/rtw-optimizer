@@ -137,7 +137,8 @@ def check_itinerary_availability(
     Args:
         itinerary: The RTW itinerary to check.
         booking_class: Override booking class for all segments. When None
-            (default), resolves per carrier from carriers.yaml (AA=H, others=D).
+            (default), resolves per carrier from carriers.yaml (D for business
+            on all carriers).
 
     Returns:
         List of availability dicts (or None) for each segment.

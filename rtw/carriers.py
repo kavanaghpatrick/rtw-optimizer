@@ -1,8 +1,9 @@
 """Shared carrier booking class resolution.
 
 Resolves the correct booking class for a carrier/cabin combination
-using data from carriers.yaml. AA uses H class for oneworld Explorer
-business; all other carriers use D.
+using data from carriers.yaml. Business books D on every eligible
+carrier (including AA). When D is sold out, Rule 3015 permits a
+fallback class: B on all carriers except AA, which falls back to H.
 """
 
 from pathlib import Path
@@ -18,9 +19,9 @@ with open(_DATA_DIR / "carriers.yaml") as f:
 
 
 def get_booking_class(carrier: Optional[str], cabin: CabinClass) -> str:
-    """Return the booking class for a carrier/cabin combination.
+    """Return the primary booking class for a carrier/cabin combination.
 
-    Business: AA -> H (from carriers.yaml rtw_booking_class), others -> D.
+    Business: D for all carriers (from carriers.yaml rtw_booking_class).
     Economy: L for all carriers.
     First: A for all carriers.
     Surface segments (carrier=None): returns D as safe default.
@@ -43,3 +44,24 @@ def get_booking_class(carrier: Optional[str], cabin: CabinClass) -> str:
         return "A"
 
     return "D"
+
+
+def get_fallback_class(carrier: Optional[str], cabin: CabinClass) -> Optional[str]:
+    """Return the fallback booking class to try when the primary is sold out.
+
+    Per Rule 3015, DONE business passengers may book the fallback class when
+    D is unavailable: H on AA, B on every other eligible carrier (from
+    carriers.yaml rtw_fallback_class). Only defined for business; economy and
+    first have no modelled fallback.
+
+    Returns None when no fallback applies (non-business cabin, surface
+    segment, or a carrier without a fallback class defined).
+    """
+    if carrier is None:
+        return None
+
+    if cabin != CabinClass.BUSINESS:
+        return None
+
+    carrier_data = _CARRIERS.get(carrier.upper(), {})
+    return carrier_data.get("rtw_fallback_class")

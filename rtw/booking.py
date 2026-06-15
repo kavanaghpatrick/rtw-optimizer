@@ -29,6 +29,7 @@ class SegmentScript(BaseModel):
     route: str
     carrier: Optional[str] = None
     booking_class: Optional[str] = None
+    fallback_class: Optional[str] = None
     phone_instruction: str
     gds_command: str = ""
     warnings: list[str] = Field(default_factory=list)
@@ -77,6 +78,21 @@ class BookingGenerator:
         from rtw.carriers import get_booking_class
 
         return get_booking_class(carrier, cabin)
+
+    def _get_fallback_class(
+        self, carrier: Optional[str], cabin: CabinClass
+    ) -> Optional[str]:
+        """Determine the fallback booking class (H on AA, B otherwise).
+
+        Delegates to shared utility in rtw.carriers. Returns None when no
+        fallback applies (surface segment or non-business cabin).
+        """
+        if carrier is None:
+            return None
+
+        from rtw.carriers import get_fallback_class
+
+        return get_fallback_class(carrier, cabin)
 
     def _is_same_city(self, airport1: str, airport2: str) -> bool:
         """Check if two airports are in the same city group."""
@@ -127,6 +143,7 @@ class BookingGenerator:
         for i, seg in enumerate(segments):
             warnings: list[str] = []
             booking_class = self._get_booking_class(seg.carrier, cabin)
+            fallback_class = self._get_fallback_class(seg.carrier, cabin)
             route = f"{seg.from_airport}-{seg.to_airport}"
 
             # --- Same-city transition warning ---
@@ -263,9 +280,13 @@ class BookingGenerator:
             date_str = seg.date.strftime("%d %b %Y") if seg.date else "date TBD"
             flight_info = f" flight {seg.flight}" if seg.flight else ""
 
+            class_line = f"  Booking class: {booking_class}"
+            if fallback_class:
+                class_line += f" (fallback: {fallback_class} if {booking_class} sold out)"
+
             instruction = (
                 f"Segment {i + 1}: {seg.carrier}{flight_info} — {route} — {date_str}\n"
-                f"  Booking class: {booking_class}"
+                f"{class_line}"
             )
             if via_info:
                 instruction += via_info
@@ -280,6 +301,7 @@ class BookingGenerator:
                     route=route,
                     carrier=seg.carrier,
                     booking_class=booking_class,
+                    fallback_class=fallback_class,
                     phone_instruction=instruction,
                     warnings=warnings,
                 )

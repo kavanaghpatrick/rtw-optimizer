@@ -2,18 +2,19 @@
 
 import pytest
 
-from rtw.carriers import get_booking_class
+from rtw.carriers import get_booking_class, get_fallback_class
 from rtw.models import CabinClass
 
 
 class TestGetBookingClass:
     """Test get_booking_class() for all carrier/cabin combinations."""
 
-    def test_aa_business_returns_h(self):
-        assert get_booking_class("AA", CabinClass.BUSINESS) == "H"
+    def test_aa_business_returns_d(self):
+        # AA's primary business RBD is D like every carrier; H is only fallback.
+        assert get_booking_class("AA", CabinClass.BUSINESS) == "D"
 
-    def test_aa_lowercase_returns_h(self):
-        assert get_booking_class("aa", CabinClass.BUSINESS) == "H"
+    def test_aa_lowercase_returns_d(self):
+        assert get_booking_class("aa", CabinClass.BUSINESS) == "D"
 
     def test_ba_business_returns_d(self):
         assert get_booking_class("BA", CabinClass.BUSINESS) == "D"
@@ -56,3 +57,29 @@ class TestGetBookingClass:
                 result = get_booking_class(carrier, cabin)
                 assert isinstance(result, str)
                 assert len(result) == 1
+
+
+class TestGetFallbackClass:
+    """Test get_fallback_class() — the class to try when D is sold out."""
+
+    def test_aa_fallback_is_h(self):
+        assert get_fallback_class("AA", CabinClass.BUSINESS) == "H"
+
+    def test_aa_lowercase_fallback_is_h(self):
+        assert get_fallback_class("aa", CabinClass.BUSINESS) == "H"
+
+    def test_non_aa_fallback_is_b(self):
+        for carrier in ("BA", "CX", "QF", "QR", "JL", "AY", "MH"):
+            assert get_fallback_class(carrier, CabinClass.BUSINESS) == "B"
+
+    def test_economy_has_no_fallback(self):
+        assert get_fallback_class("AA", CabinClass.ECONOMY) is None
+
+    def test_first_has_no_fallback(self):
+        assert get_fallback_class("BA", CabinClass.FIRST) is None
+
+    def test_surface_has_no_fallback(self):
+        assert get_fallback_class(None, CabinClass.BUSINESS) is None
+
+    def test_unknown_carrier_has_no_fallback(self):
+        assert get_fallback_class("ZZ", CabinClass.BUSINESS) is None
