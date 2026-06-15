@@ -135,10 +135,10 @@ class TestFullPipeline:
         itin = Itinerary(
             ticket=ticket,
             segments=[
-                {"from": "SYD", "to": "HKG", "carrier": "CX", "type": "stopover"},
+                {"from": "SYD", "to": "HKG", "carrier": "CX", "type": "stopover", "date": "2026-09-01"},
                 {"from": "HKG", "to": "BKK", "type": "surface"},
-                {"from": "BKK", "to": "LHR", "carrier": "BA", "type": "stopover"},
-                {"from": "LHR", "to": "SYD", "carrier": "QF", "type": "final"},
+                {"from": "BKK", "to": "LHR", "carrier": "BA", "type": "stopover", "date": "2026-09-05"},
+                {"from": "LHR", "to": "SYD", "carrier": "QF", "type": "final", "date": "2026-09-10"},
             ],
         )
         candidate = CandidateItinerary(itinerary=itin, direction=Direction.EASTBOUND)
@@ -184,7 +184,9 @@ class TestFullPipeline:
         cache = MagicMock()
         cache.get.return_value = None
 
-        verifier = DClassVerifier(scraper=scraper, cache=cache)
+        # Disable fallback so this stays a focused surface-skip test with
+        # exactly 3 scraper calls (fallback scanning is covered in test_verifier).
+        verifier = DClassVerifier(scraper=scraper, cache=cache, enable_fallback=False)
         result = verifier.verify_option(option)
 
         assert result.total_flown == 3  # Surface excluded

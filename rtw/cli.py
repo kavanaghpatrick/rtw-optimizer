@@ -662,7 +662,7 @@ def scrape_prices(
 @scrape_app.command(name="availability")
 def scrape_availability(
     file: str = typer.Argument(help="Path to itinerary YAML file"),
-    booking_class: Optional[str] = typer.Option(None, "--class", "-c", help="Override booking class (default: auto per carrier, AA=H, others=D)"),
+    booking_class: Optional[str] = typer.Option(None, "--class", "-c", help="Override booking class (default: auto per carrier, D for business)"),
     verbose: VerboseFlag = False,
     quiet: QuietFlag = False,
 ) -> None:
@@ -961,6 +961,21 @@ def _display_verify_result(result: "VerifyResult", quiet: bool = False) -> None:
                         "", "", "", "",
                     )
 
+            # Fallback-class rescue row: primary D0 but fallback class bookable
+            if (
+                status == DClassStatus.NOT_AVAILABLE
+                and seg.fallback
+                and seg.fallback.status == DClassStatus.AVAILABLE
+            ):
+                fb = seg.fallback
+                table.add_row(
+                    "",
+                    f"  [green]→ fallback {fb.booking_class}-class bookable[/green]",
+                    "", "",
+                    f"[green]{fb.display_code}[/green]",
+                    f"[green]{fb.seats}[/green]",
+                )
+
             # Alternate date hint for unavailable segments
             if (
                 status == DClassStatus.NOT_AVAILABLE
@@ -1000,6 +1015,11 @@ def _display_verify_result(result: "VerifyResult", quiet: bool = False) -> None:
                 f"[yellow]{result.confirmed}/{result.total_flown} flown segments "
                 f"confirmed ({result.percentage:.0f}%).[/yellow]"
             )
+            if result.fallback_bookable:
+                console.print(
+                    f"[cyan]+{result.fallback_bookable} more bookable in the fallback "
+                    f"class (H on AA, B otherwise) when D is sold out.[/cyan]"
+                )
 
     except ImportError:
         # Plain text fallback
@@ -1031,6 +1051,17 @@ def _display_verify_result(result: "VerifyResult", quiet: bool = False) -> None:
                         typer.echo(f"       ({d0_count} more at D0)", err=True)
                 if (
                     seg.dclass.status == DClassStatus.NOT_AVAILABLE
+                    and seg.fallback
+                    and seg.fallback.status == DClassStatus.AVAILABLE
+                ):
+                    fb = seg.fallback
+                    typer.echo(
+                        f"       -> fallback {fb.booking_class}-class bookable: "
+                        f"{fb.display_code} ({fb.seats} seats)",
+                        err=True,
+                    )
+                if (
+                    seg.dclass.status == DClassStatus.NOT_AVAILABLE
                     and seg.dclass.best_alternate
                 ):
                     alt = seg.dclass.best_alternate
@@ -1046,6 +1077,12 @@ def _display_verify_result(result: "VerifyResult", quiet: bool = False) -> None:
             f"  Result: {result.confirmed}/{result.total_flown} confirmed ({pct})",
             err=True,
         )
+        if result.fallback_bookable:
+            typer.echo(
+                f"  +{result.fallback_bookable} more bookable in the fallback class "
+                f"(H on AA, B otherwise) when D is sold out.",
+                err=True,
+            )
 
 
 def _display_verify_summary(results: list) -> None:
@@ -1087,8 +1124,9 @@ def verify(
     option_ids: Annotated[
         Optional[list[int]], typer.Argument(help="Option IDs to verify (1-based). Omit for top 3.")
     ] = None,
-    booking_class: Annotated[Optional[str], typer.Option("--class", "-c", help="Override booking class (default: auto per carrier, AA=H, others=D)")] = None,
+    booking_class: Annotated[Optional[str], typer.Option("--class", "-c", help="Override booking class (default: auto per carrier, D for business; fallback H on AA, B otherwise)")] = None,
     no_cache: Annotated[bool, typer.Option("--no-cache", help="Skip cache")] = False,
+    no_fallback: Annotated[bool, typer.Option("--no-fallback", help="Don't re-scan the fallback class (H/B) when D is sold out")] = False,
     json: JsonFlag = False,
     plain: PlainFlag = False,
     verbose: VerboseFlag = False,
@@ -1098,6 +1136,10 @@ def verify(
 
     Uses ExpertFlyer to check booking class availability on each flown
     segment. Requires a prior `rtw search` and `rtw login expertflyer`.
+
+    When a segment's primary class (D) is sold out, the rule-mandated
+    fallback class is re-scanned (H on AA, B on other carriers) and shown
+    as a rescue row. Pass --no-fallback to disable.
     """
     _setup_logging(verbose, quiet)
 
@@ -1155,12 +1197,35 @@ def verify(
                 scraper=scraper,
                 cache=ScrapeCache(),
                 booking_class=booking_class,
+                enable_fallback=not no_fallback,
             )
-            # Note: booking_class=None means auto per-carrier (AA=H, others=D)
+            # Note: booking_class=None means auto per-carrier (D for business);
+            # fallback class scanned on D0 unless --no-fallback (H on AA, B otherwise)
 
             # Convert and verify with Rich progress
             results = []
             use_rich_progress = not json and not quiet and not plain
+
+            # Warn if the chosen options carry no dates — those segments can't
+            # be verified (they'll be marked UNKNOWN, not crash).
+            options_to_verify = [
+                _scored_to_verify_option(search_result.options[oid - 1], oid)
+                for oid in ids
+            ]
+            has_any_date = any(
+                seg.target_date is not None
+                for opt in options_to_verify
+                for seg in opt.segments
+                if seg.segment_type == "FLOWN"
+            )
+            if not has_any_date and not quiet:
+                typer.echo(
+                    "Warning: these search results have no segment dates, so "
+                    "availability cannot be checked. Build a dated itinerary "
+                    "(e.g. `rtw build` / `rtw scan-dates`) and verify that, or "
+                    "re-run `rtw search` with a date range.",
+                    err=True,
+                )
 
             for oid in ids:
                 scored = search_result.options[oid - 1]

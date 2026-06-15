@@ -206,8 +206,8 @@ class TestDClassVerifier:
         assert result.fully_bookable is True
         assert scraper.check_availability.call_count == 0
 
-    def test_aa_segment_uses_h_class(self):
-        """AA segments should be queried with booking_class='H'."""
+    def test_aa_segment_uses_d_class(self):
+        """AA segments are queried with primary booking_class='D' (H is fallback)."""
         results = [
             _make_dclass(DClassStatus.AVAILABLE, 9, carrier="AA", origin="JFK", dest="LAX"),
         ]
@@ -219,7 +219,7 @@ class TestDClassVerifier:
         )
         verifier.verify_option(option)
         call_kwargs = scraper.check_availability.call_args[1]
-        assert call_kwargs["booking_class"] == "H"
+        assert call_kwargs["booking_class"] == "D"
 
     def test_cx_segment_uses_d_class(self):
         """Non-AA carriers should use D class."""
@@ -237,7 +237,7 @@ class TestDClassVerifier:
         assert call_kwargs["booking_class"] == "D"
 
     def test_mixed_carriers_use_correct_classes(self):
-        """AA gets H, CX gets D, BA gets D in the same option."""
+        """All carriers book D as primary (AA included) when available."""
         results = [
             _make_dclass(DClassStatus.AVAILABLE, 9, carrier="AA", origin="JFK", dest="LHR"),
             _make_dclass(DClassStatus.AVAILABLE, 5, carrier="CX", origin="LHR", dest="HKG"),
@@ -255,7 +255,7 @@ class TestDClassVerifier:
         )
         verifier.verify_option(option)
         calls = scraper.check_availability.call_args_list
-        assert calls[0][1]["booking_class"] == "H"  # AA
+        assert calls[0][1]["booking_class"] == "D"  # AA (primary D)
         assert calls[1][1]["booking_class"] == "D"  # CX
         assert calls[2][1]["booking_class"] == "D"  # BA
 
@@ -284,20 +284,22 @@ class TestDClassVerifier:
         assert calls[1][1]["booking_class"] == "D"  # CX stays D
 
     def test_cache_key_includes_correct_booking_class(self):
-        """AA cache key should contain H, CX cache key should contain D."""
+        """Primary cache key contains D; explicit fallback key contains H/B."""
         verifier, scraper, cache = self._make_verifier()
 
         aa_seg = _make_segment("JFK", "LHR", carrier="AA")
         cx_seg = _make_segment("LHR", "HKG", carrier="CX")
 
-        aa_key = verifier._cache_key(aa_seg)
-        cx_key = verifier._cache_key(cx_seg)
+        # Primary keys both use D now
+        assert verifier._cache_key(aa_seg).endswith("_D")
+        assert verifier._cache_key(cx_seg).endswith("_D")
 
-        assert "_H" in aa_key
-        assert "_D" in cx_key
+        # Fallback keys cache independently under their own class
+        assert verifier._cache_key(aa_seg, "H").endswith("_H")
+        assert verifier._cache_key(cx_seg, "B").endswith("_B")
 
     def test_dclass_result_has_booking_class_set(self):
-        """DClassResult returned for AA should have booking_class='H'."""
+        """DClassResult returned for AA should have primary booking_class='D'."""
         results = [
             _make_dclass(DClassStatus.AVAILABLE, 9, carrier="AA", origin="JFK", dest="LHR"),
         ]
@@ -308,4 +310,112 @@ class TestDClassVerifier:
             segments=[_make_segment("JFK", "LHR", carrier="AA")],
         )
         result = verifier.verify_option(option)
-        assert result.segments[0].dclass.booking_class == "H"
+        assert result.segments[0].dclass.booking_class == "D"
+
+    def test_dateless_segment_marked_unknown_not_crash(self):
+        """A flown segment with no date is marked UNKNOWN, never crashes/scrapes."""
+        scraper = MagicMock()  # must not be called
+        cache = MagicMock()
+        cache.get.return_value = None
+        verifier = DClassVerifier(scraper=scraper, cache=cache)
+
+        dateless = SegmentVerification(
+            index=0, segment_type="FLOWN", origin="JFK",
+            destination="LAX", carrier="AA", target_date=None,
+        )
+        option = VerifyOption(option_id=1, segments=[dateless])
+
+        result = verifier.verify_option(option)  # must not raise
+        assert scraper.check_availability.call_count == 0
+        seg = result.segments[0]
+        assert seg.dclass.status == DClassStatus.UNKNOWN
+        assert "date" in (seg.dclass.error_message or "").lower()
+        assert seg.fallback is None
+
+
+class TestFallbackScan:
+    """Fallback-class re-scan when the primary class (D) is sold out."""
+
+    def _verifier(self, results, **kwargs):
+        scraper = MagicMock()
+        scraper.check_availability.side_effect = results
+        cache = MagicMock()
+        cache.get.return_value = None
+        return DClassVerifier(scraper=scraper, cache=cache, **kwargs), scraper
+
+    def test_fallback_scanned_when_primary_d0(self):
+        """AA D0 triggers a second scan in the fallback class H."""
+        results = [
+            _make_dclass(DClassStatus.NOT_AVAILABLE, 0, carrier="AA", origin="JFK", dest="LAX"),
+            _make_dclass(DClassStatus.AVAILABLE, 4, carrier="AA", origin="JFK", dest="LAX"),
+        ]
+        verifier, scraper = self._verifier(results)
+        option = VerifyOption(
+            option_id=1, segments=[_make_segment("JFK", "LAX", carrier="AA")]
+        )
+        result = verifier.verify_option(option)
+
+        assert scraper.check_availability.call_count == 2
+        calls = scraper.check_availability.call_args_list
+        assert calls[0][1]["booking_class"] == "D"
+        assert calls[1][1]["booking_class"] == "H"
+        seg = result.segments[0]
+        assert seg.dclass.status == DClassStatus.NOT_AVAILABLE
+        assert seg.fallback is not None
+        assert seg.fallback.status == DClassStatus.AVAILABLE
+        assert seg.fallback.booking_class == "H"
+        assert result.fallback_bookable == 1
+
+    def test_non_aa_fallback_uses_b(self):
+        """CX D0 triggers a fallback scan in B."""
+        results = [
+            _make_dclass(DClassStatus.NOT_AVAILABLE, 0, carrier="CX", origin="SYD", dest="HKG"),
+            _make_dclass(DClassStatus.AVAILABLE, 2, carrier="CX", origin="SYD", dest="HKG"),
+        ]
+        verifier, scraper = self._verifier(results)
+        option = VerifyOption(
+            option_id=1, segments=[_make_segment("SYD", "HKG", carrier="CX")]
+        )
+        result = verifier.verify_option(option)
+        assert scraper.check_availability.call_count == 2
+        assert scraper.check_availability.call_args_list[1][1]["booking_class"] == "B"
+        assert result.segments[0].fallback.booking_class == "B"
+
+    def test_no_fallback_when_primary_available(self):
+        """No second scan when the primary class already has seats."""
+        results = [
+            _make_dclass(DClassStatus.AVAILABLE, 9, carrier="AA", origin="JFK", dest="LAX"),
+        ]
+        verifier, scraper = self._verifier(results)
+        option = VerifyOption(
+            option_id=1, segments=[_make_segment("JFK", "LAX", carrier="AA")]
+        )
+        result = verifier.verify_option(option)
+        assert scraper.check_availability.call_count == 1
+        assert result.segments[0].fallback is None
+
+    def test_no_fallback_when_disabled(self):
+        """enable_fallback=False suppresses the fallback scan on D0."""
+        results = [
+            _make_dclass(DClassStatus.NOT_AVAILABLE, 0, carrier="AA", origin="JFK", dest="LAX"),
+        ]
+        verifier, scraper = self._verifier(results, enable_fallback=False)
+        option = VerifyOption(
+            option_id=1, segments=[_make_segment("JFK", "LAX", carrier="AA")]
+        )
+        result = verifier.verify_option(option)
+        assert scraper.check_availability.call_count == 1
+        assert result.segments[0].fallback is None
+
+    def test_no_fallback_with_explicit_override(self):
+        """An explicit booking_class override disables fallback scanning."""
+        results = [
+            _make_dclass(DClassStatus.NOT_AVAILABLE, 0, carrier="AA", origin="JFK", dest="LAX"),
+        ]
+        verifier, scraper = self._verifier(results, booking_class="D")
+        option = VerifyOption(
+            option_id=1, segments=[_make_segment("JFK", "LAX", carrier="AA")]
+        )
+        result = verifier.verify_option(option)
+        assert scraper.check_availability.call_count == 1
+        assert result.segments[0].fallback is None

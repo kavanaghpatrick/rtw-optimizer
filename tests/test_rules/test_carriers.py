@@ -187,3 +187,45 @@ class TestTicketValidity:
         ctx = build_context(itin)
         results = TicketValidityRule().check(itin, ctx)
         assert all(r.passed for r in results)
+
+
+class TestFallbackClassSchema:
+    """Every eligible carrier must define a business fallback class (Rule 3015)."""
+
+    @staticmethod
+    def _carriers():
+        import yaml
+        from pathlib import Path
+
+        carriers_path = (
+            Path(__file__).parent.parent.parent / "rtw" / "data" / "carriers.yaml"
+        )
+        with open(carriers_path) as f:
+            return yaml.safe_load(f)
+
+    def test_aa_primary_d_fallback_h(self):
+        aa = self._carriers()["AA"]
+        assert aa["rtw_booking_class"] == "D"
+        assert aa["rtw_fallback_class"] == "H"
+
+    def test_every_eligible_carrier_has_fallback(self):
+        carriers = self._carriers()
+        eligible = {
+            c: v
+            for c, v in carriers.items()
+            if isinstance(v, dict) and v.get("eligible")
+        }
+        missing = [c for c, v in eligible.items() if not v.get("rtw_fallback_class")]
+        assert not missing, f"eligible carriers missing rtw_fallback_class: {missing}"
+
+    def test_non_aa_eligible_fallback_is_b(self):
+        carriers = self._carriers()
+        bad = [
+            c
+            for c, v in carriers.items()
+            if isinstance(v, dict)
+            and v.get("eligible")
+            and c != "AA"
+            and v.get("rtw_fallback_class") != "B"
+        ]
+        assert not bad, f"non-AA eligible carriers with fallback != B: {bad}"

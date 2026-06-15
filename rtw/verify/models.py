@@ -49,7 +49,9 @@ class DClassResult(BaseModel):
     carrier: str
     origin: str = Field(min_length=3, max_length=3)
     destination: str = Field(min_length=3, max_length=3)
-    target_date: datetime.date
+    # Optional so an error/unknown result can be built for a segment that has
+    # no date assigned (e.g. a dateless saved search) without raising.
+    target_date: Optional[datetime.date] = None
     booking_class: str = "D"
     checked_at: datetime.datetime = Field(
         default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
@@ -135,6 +137,9 @@ class SegmentVerification(BaseModel):
     flight_number: Optional[str] = None
     target_date: Optional[datetime.date] = None
     dclass: Optional[DClassResult] = None
+    # Fallback-class result, populated only when the primary (D) check returned
+    # NOT_AVAILABLE and the carrier has a fallback class (H on AA, B otherwise).
+    fallback: Optional[DClassResult] = None
     married_segment_note: Optional[str] = None
 
 
@@ -198,6 +203,26 @@ class VerifyResult(BaseModel):
             and s.dclass.status == DClassStatus.AVAILABLE
             and not s.dclass.has_nonstop
         ]
+
+    @property
+    def fallback_segments(self) -> list[SegmentVerification]:
+        """Segments where primary (D) is sold out but the fallback class is available.
+
+        These are bookable on the rule-mandated fallback (H on AA, B otherwise)
+        even though a D-only scan would mark them unbookable.
+        """
+        return [
+            s for s in self.flown_segments
+            if s.dclass
+            and s.dclass.status == DClassStatus.NOT_AVAILABLE
+            and s.fallback
+            and s.fallback.status == DClassStatus.AVAILABLE
+        ]
+
+    @property
+    def fallback_bookable(self) -> int:
+        """Count of flown segments rescued by fallback-class availability."""
+        return len(self.fallback_segments)
 
 
 # Type alias for progress callbacks
