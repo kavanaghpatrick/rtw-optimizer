@@ -91,7 +91,7 @@ class PlainFormatter:
         total_distance = 0.0
 
         for e in estimates:
-            rate_str = f"{e.rate:.0%}" if e.rate is not None else "-"
+            rate_str = f"{e.rate:g}%" if e.rate is not None else "-"
             lines.append(
                 f"  {e.segment_index + 1:>3}  {e.route:<10} {e.carrier:<8} "
                 f"{e.distance_miles:>10,.0f} {e.method.value:<9} {rate_str:>6} "

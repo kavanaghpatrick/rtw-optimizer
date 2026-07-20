@@ -220,11 +220,14 @@ distance_based:
     V: 2
 
   WY:
+    # Oman Air (15th oneworld member, 1 Jul 2025). All business buckets
+    # (I/P/J/C/D) earn a flat 12.5% for tier points — there is no 6% band;
+    # only First (F/A) earns 25%. Verified vs Head for Points (Feb 2026).
     D: 12.5
     J: 12.5
     C: 12.5
-    I: 6
-    Z: 6
+    I: 12.5
+    Z: 12.5
     Y: 3.5
     B: 3.5
     H: 3.5

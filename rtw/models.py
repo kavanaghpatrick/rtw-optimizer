@@ -153,6 +153,11 @@ class Segment(BaseModel):
     type: SegmentType = SegmentType.STOPOVER
     via: Optional[str | list[str]] = None
     notes: Optional[str] = None
+    booking_class: Optional[str] = Field(default=None, min_length=1, max_length=2)
+    """Actual RBD the segment is/was booked in (e.g. D, or B as a Rule 3015
+    business fallback). Drives per-segment earning; if unset, earning assumes
+    the cabin's primary class. A fallback bucket earns far less than D — see
+    docs earning rules (rtw/data/ntp_rates.yaml)."""
 
     model_config = {"populate_by_name": True}
 
@@ -169,6 +174,11 @@ class Segment(BaseModel):
     @field_validator("operating_carrier", mode="before")
     @classmethod
     def uppercase_operating_carrier(cls, v: Optional[str]) -> Optional[str]:
+        return v.upper() if isinstance(v, str) else v
+
+    @field_validator("booking_class", mode="before")
+    @classmethod
+    def uppercase_booking_class(cls, v: Optional[str]) -> Optional[str]:
         return v.upper() if isinstance(v, str) else v
 
     @field_validator("via", mode="before")
