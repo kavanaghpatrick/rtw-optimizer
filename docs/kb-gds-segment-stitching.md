@@ -3,6 +3,8 @@
 **Date**: 2026-03-30
 **Sources**: FlyerTalk threads (185111, 363343, 1885075, 1955010, 2008084), 12-rtw-optimization-guide.md, existing FlyerTalk research, QR first-carrier research, booking.py GDS commands, IATA Rule 3015
 
+> ⚠️ **NOT AUTHORITATIVE FOR GDS ENTRY SYNTAX.** The specific Amadeus/Sabre command strings in this document (the `SS D1 …` sells, bare `FXP`, `FQD…/VRW`, `OSI YY OW RTW`, `/R,VC-` line, the Appendix command tables) were **reverse-documented from `rtw/booking.py`** and corroborated only against FlyerTalk — a circular, non-first-party chain. Several are confirmed **wrong** (e.g. bare `FXP` does not price an RTW fare; the fare owner publishes *"auto-pricing available: No"*). For verified GDS entries use **`kb-owe-rtw-gds-firstparty.md`**, which quotes carrier/alliance publications verbatim. The *process/workflow* content below (segment-by-segment method, married-segment tricks, fares-team turnaround, cross-system PNR behavior) remains useful and is unaffected by this warning.
+
 ---
 
 ## 1. Sabre vs Amadeus: Capabilities and Limitations

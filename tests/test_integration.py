@@ -206,8 +206,12 @@ class TestV3FullPipeline:
         assert "CHECKLIST" in script.closing.upper()
         # GDS commands should be non-empty
         assert len(script.gds_commands) > 0
-        # Should have ARNK for the surface sector
-        assert "ARNK" in script.gds_commands
+        # Should price as a round-the-world fare (first-party RTW entry)
+        assert any(
+            c.startswith("FXP/S") and "RW/A-" in c for c in script.gds_commands
+        )
+        # SS/ARNK/OSI plumbing is omitted pending live-terminal confirmation
+        assert "ARNK" not in script.gds_commands
 
     def test_full_pipeline_no_exceptions(self, v3_itinerary):
         """Running all pipeline stages sequentially completes without error."""

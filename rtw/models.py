@@ -127,6 +127,19 @@ class Ticket(BaseModel):
         """Fare prefix letter (D=business, L=economy, A=first)."""
         return self.type.value[0]
 
+    @property
+    def fare_basis(self) -> str:
+        """Filed oneworld Explorer fare basis (== the ticket type, e.g. 'DONE4').
+
+        The TicketType value is the filed fare basis: confirmed first-party by
+        the oneworld alliance Rule 3015 fare-basis table and by fares.db, which
+        files DONE4/AONE3/LONE5... as ``fare_basis`` across every eligible
+        carrier. Used to force pricing (``FXP/S{N}RW/A-{fare_basis}``) since
+        these fares cannot be auto-priced. See
+        docs/kb-owe-rtw-gds-firstparty.md.
+        """
+        return self.type.value
+
 
 class Segment(BaseModel):
     """A single flight or surface segment."""
