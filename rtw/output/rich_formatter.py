@@ -72,12 +72,12 @@ class RichFormatter:
         )
         summary_text.append(f"\nRules:      {passed}/{total} passed")
         if violations:
-            summary_text.append(f"\nViolations: ")
+            summary_text.append("\nViolations: ")
             summary_text.append(str(violations), style="bold red")
         else:
             summary_text.append(f"\nViolations: {violations}")
         if warnings:
-            summary_text.append(f"\nWarnings:   ")
+            summary_text.append("\nWarnings:   ")
             summary_text.append(str(warnings), style="yellow")
         else:
             summary_text.append(f"\nWarnings:   {warnings}")
@@ -152,7 +152,7 @@ class RichFormatter:
         total_distance = 0.0
 
         for e in estimates:
-            rate_str = f"{e.rate:.0%}" if e.rate is not None else "-"
+            rate_str = f"{e.rate:g}%" if e.rate is not None else "-"
             table.add_row(
                 str(e.segment_index + 1),
                 e.route,

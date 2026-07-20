@@ -111,6 +111,105 @@ class TestDistanceBased:
         assert est.estimated_ntp > 0
 
 
+class TestPerSegmentBookingClass:
+    """Per-segment RBD overrides the itinerary-wide default (fixes B-class over-count)."""
+
+    def test_default_class_earns_d_rate(self, calc):
+        """No booking_class on the segment -> uses the default D (JL D = 50%)."""
+        itin = _make_itinerary([{"from": "HND", "to": "SIN", "carrier": "JL"}])
+        est = calc.calculate(itin)[0]
+        assert est.rate == 50
+
+    def test_segment_booking_class_overrides_default(self, calc):
+        """A JL segment booked in B earns the B rate (15%), not D's 50%."""
+        itin = _make_itinerary(
+            [{"from": "HND", "to": "SIN", "carrier": "JL", "booking_class": "B"}]
+        )
+        est = calc.calculate(itin)[0]
+        assert est.rate == 15
+        # and it is genuinely lower than the D-rate result
+        d_est = calc.calculate(
+            _make_itinerary([{"from": "HND", "to": "SIN", "carrier": "JL"}])
+        )[0]
+        assert est.estimated_ntp < d_est.estimated_ntp
+
+    def test_mixed_classes_per_segment(self, calc):
+        """Different RBDs on different segments are honoured independently."""
+        itin = _make_itinerary(
+            [
+                {"from": "SFO", "to": "HND", "carrier": "JL"},  # default D -> 50
+                {"from": "HND", "to": "SIN", "carrier": "JL", "booking_class": "B"},  # 15
+            ]
+        )
+        results = calc.calculate(itin)
+        assert results[0].rate == 50
+        assert results[1].rate == 15
+
+
+class TestEarningNotes:
+    """Plain-language earning explanations on distance segments."""
+
+    def test_half_band_carrier_flagged(self, calc):
+        """A 25%-band carrier (CX) in D is flagged as half of a 50%-band partner."""
+        itin = _make_itinerary([{"from": "SIN", "to": "HKG", "carrier": "CX"}])
+        est = calc.calculate(itin)[0]
+        assert "half of a 50%-band partner" in est.notes
+        assert "25%" in est.notes
+
+    def test_quarter_band_carrier_flagged(self, calc):
+        """WY (12.5%) in D is flagged as a quarter of a 50%-band partner."""
+        itin = _make_itinerary([{"from": "MCT", "to": "LHR", "carrier": "WY"}])
+        est = calc.calculate(itin)[0]
+        assert "a quarter of a 50%-band partner" in est.notes
+
+    def test_top_band_carrier_no_half_note(self, calc):
+        """A 50%-band carrier (JL) in D is NOT flagged as reduced."""
+        itin = _make_itinerary([{"from": "SFO", "to": "HND", "carrier": "JL"}])
+        est = calc.calculate(itin)[0]
+        assert "half of a 50%-band partner" not in est.notes
+
+    def test_fallback_class_note(self, calc):
+        """A non-D fallback bucket explains the earning drop vs D."""
+        itin = _make_itinerary(
+            [{"from": "HND", "to": "SIN", "carrier": "JL", "booking_class": "B"}]
+        )
+        est = calc.calculate(itin)[0]
+        assert "booked B" in est.notes
+        assert "15%" in est.notes
+        assert "D on JL earns 50%" in est.notes
+
+
+class TestRateDisplay:
+    """The rate column renders whole-number percents, not fractions * 100."""
+
+    def test_plain_formatter_rate_not_multiplied(self):
+        """Regression: rate 25 must render '25%', never '2500%' (was f'{rate:.0%}')."""
+        from rtw.models import NTPEstimate
+        from rtw.output import get_formatter
+
+        est = NTPEstimate(
+            segment_index=0, route="HKG-LHR", carrier="CX", distance_miles=5984,
+            method=NTPMethod.DISTANCE, rate=25, estimated_ntp=1496,
+            confidence="calculated", notes="",
+        )
+        out = get_formatter("plain").format_ntp([est])
+        assert "25%" in out
+        assert "2500%" not in out
+
+    def test_plain_formatter_fractional_rate(self):
+        """A 12.5% rate renders cleanly, not '1250%' or '12%'."""
+        from rtw.models import NTPEstimate
+        from rtw.output import get_formatter
+
+        est = NTPEstimate(
+            segment_index=0, route="MCT-LHR", carrier="WY", distance_miles=3260,
+            method=NTPMethod.DISTANCE, rate=12.5, estimated_ntp=408,
+            confidence="calculated", notes="",
+        )
+        out = get_formatter("plain").format_ntp([est])
+        assert "12.5%" in out
+
+
 # ------------------------------------------------------------------
 # Revenue-based NTP tests
 # ------------------------------------------------------------------

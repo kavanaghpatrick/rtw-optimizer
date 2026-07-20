@@ -1,5 +1,7 @@
 """Tests for booking script generator (T031-T034)."""
 
+import re
+
 import pytest
 
 from rtw.booking import BookingGenerator, BookingScript, SegmentScript
@@ -256,8 +258,8 @@ class TestThroughFlightWarnings:
         via_warnings = [w for w in scripts[0].warnings if "Through-flight" in w]
         assert len(via_warnings) == 0
 
-    def test_gds_via_segment_single_entry(self, generator):
-        """GDS command for via segment is a single SS entry (not split)."""
+    def test_via_segment_is_single_segment_script(self, generator):
+        """A through-flight (via) is one segment script, not split at the via."""
         itin = Itinerary(
             ticket={"type": "DONE4", "cabin": "business", "origin": "SYD"},
             segments=[
@@ -271,11 +273,12 @@ class TestThroughFlightWarnings:
                  "date": "2026-04-15"},
             ],
         )
-        gds = generator._gds_commands(itin)
-        # First SS command should be SYD-LHR, not SYD-SIN + SIN-LHR
-        ss_commands = [c for c in gds if c.startswith("SS")]
-        assert any("SYDLHR" in c for c in ss_commands)
-        assert not any("SYDSIN" in c for c in ss_commands)
+        # The through-flight is a single SYD-LHR segment; the SIN via-stop is
+        # never a standalone segment (booked as one, per Rule 3015).
+        routes = [s.route for s in generator._segment_scripts(itin)]
+        assert "SYD-LHR" in routes
+        assert "SYD-SIN" not in routes
+        assert not any("SIN" in r for r in routes)
 
     def test_cx_booking_warning(self, generator):
         """CX segment not through HKG triggers D-class married warning."""
@@ -297,48 +300,73 @@ class TestThroughFlightWarnings:
 
 
 class TestGDSCommands:
-    """Test Amadeus GDS command generation."""
+    """Test the first-party Amadeus RTW GDS entries.
+
+    Only two entries are emitted (FQD fare display + FXP RTW pricing), quoted
+    from carrier/alliance references. See docs/kb-owe-rtw-gds-firstparty.md.
+    """
 
     def test_fqd_command(self, generator, v3):
-        """FQD fare display command for round-trip from origin."""
+        """FQD displays the published RTW fare (/VRW), origin back to origin."""
         commands = generator._gds_commands(v3)
         fqd = commands[0]
-        assert fqd.startswith("FQD")
-        assert "CAICAI" in fqd
-        assert "/VRW" in fqd
+        assert fqd.startswith("FQDCAICAI/VRW/")
         assert "10MAR" in fqd
+        # first-party form has no /D prefix on the date qualifier
+        assert "/VRW/D" not in fqd
 
-    def test_osi_command(self, generator, v3):
-        """OSI entry for oneworld RTW."""
-        commands = generator._gds_commands(v3)
-        assert "OSI YY OW RTW" in commands
+    def test_fxp_rtw_pricing_command(self, generator, v3):
+        """FXP prices as a round-the-world specified fare, forcing the OWE basis.
 
-    def test_plating_carrier_override(self, generator, v3):
-        """Plating carrier override command."""
+        This is the fix: the /S{N}RW global indicator + /A-{fare basis} build
+        the RTW fare. Bare 'FXP' (auto-pricing) must not be present because the
+        fare owner publishes 'auto-pricing available: No'.
+        """
         commands = generator._gds_commands(v3)
-        assert "/R,VC-AA" in commands
+        fxp = [c for c in commands if c.startswith("FXP")]
+        assert len(fxp) == 1
+        assert re.fullmatch(r"FXP/S\d+RW/A-DONE4", fxp[0]), fxp[0]
+        assert "FXP" not in commands  # bare auto-pricing entry absent
 
-    def test_fxp_pricing_command(self, generator, v3):
-        """FXP pricing command present."""
-        commands = generator._gds_commands(v3)
-        assert "FXP" in commands
+    def test_omits_unverified_entries(self, generator, v3):
+        """SS sells, ARNK, OSI, and validating-carrier lines are omitted.
 
-    def test_arnk_for_surface(self, generator, v3):
-        """Surface segment generates ARNK command."""
+        These are standard Amadeus plumbing with no first-party source; they
+        stay out of the cryptic list pending live-terminal confirmation.
+        """
         commands = generator._gds_commands(v3)
-        assert "ARNK" in commands
+        assert not any(c.startswith("SS") for c in commands)
+        assert "ARNK" not in commands
+        assert not any("OSI" in c for c in commands)
+        assert not any("/R,VC-" in c for c in commands)
 
-    def test_segment_entries_have_class(self, generator, v3):
-        """Segment sell commands include booking class."""
-        commands = generator._gds_commands(v3)
-        ss_commands = [c for c in commands if c.startswith("SS")]
-        assert len(ss_commands) > 0
-        # AA segments sell in D (primary), not H — H is only the fallback class
-        aa_cmds = [c for c in ss_commands if "AA" in c]
-        assert len(aa_cmds) > 0
-        for cmd in aa_cmds:
-            assert "D1" in cmd
-            assert "H1" not in cmd
+    def test_fxp_first_flown_line_counts_leading_surface(self, generator):
+        """/S{N} accounts for a surface sector preceding the first flight."""
+        itin = Itinerary(
+            ticket={"type": "DONE4", "cabin": "business", "origin": "LHR"},
+            segments=[
+                {"from": "LHR", "to": "CDG", "type": "surface"},
+                {"from": "CDG", "to": "JFK", "carrier": "AA", "date": "2026-04-01"},
+                {"from": "JFK", "to": "LHR", "carrier": "BA", "type": "final",
+                 "date": "2026-04-10"},
+            ],
+        )
+        fxp = next(c for c in generator._gds_commands(itin) if c.startswith("FXP"))
+        # surface = line 1, first flight = line 2
+        assert fxp.startswith("FXP/S2RW/")
+
+    def test_fxp_uses_ticket_fare_basis(self, generator):
+        """The forced fare basis is the ticket type verbatim (AONE3, LONE5...)."""
+        itin = Itinerary(
+            ticket={"type": "LONE3", "cabin": "economy", "origin": "OSL"},
+            segments=[
+                {"from": "OSL", "to": "JFK", "carrier": "AA", "date": "2026-05-01"},
+                {"from": "JFK", "to": "OSL", "carrier": "AA", "type": "final",
+                 "date": "2026-05-10"},
+            ],
+        )
+        fxp = next(c for c in generator._gds_commands(itin) if c.startswith("FXP"))
+        assert fxp.endswith("/A-LONE3")
 
     def test_gds_date_format(self, generator):
         """GDS dates format as DDMMM uppercase."""

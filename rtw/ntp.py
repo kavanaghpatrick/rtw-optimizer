@@ -25,6 +25,17 @@ _DATA_DIR = Path(__file__).parent / "data"
 # Rough USD-to-GBP conversion rate
 _USD_TO_GBP = 0.79
 
+# Top business earning band (QR/JL/AY flexible D/C/J earn 50% of miles), used as
+# the reference point when explaining why a segment earns "half". See
+# docs/kb-... / rtw/data/ntp_rates.yaml.
+_TOP_BUSINESS_RATE = 50.0
+
+
+def _pct(x: float) -> str:
+    """Format an earning percentage without spurious trailing zeros: 25 -> '25%',
+    12.5 -> '12.5%'."""
+    return f"{x:g}%"
+
 
 class NTPCalculator:
     """Calculate NTP earnings for RTW itinerary segments."""
@@ -58,15 +69,21 @@ class NTPCalculator:
         carrier = segment.carrier or ""
         carrier_rates = self._rates["distance_based"].get(carrier, {})
         rate = carrier_rates.get(booking_class, 0)
+        d_rate = carrier_rates.get("D", 0)  # business-primary (flexible D) rate
 
         ntp = distance_miles * (rate / 100)
 
         route = f"{segment.from_airport}-{segment.to_airport}"
-        notes = ""
+        note_parts: list[str] = []
 
         # FJ ATR-72 segments: D maps to Y cabin but still earns at D-class rate
         if carrier == "FJ" and distance_miles < 700 and booking_class == "D":
-            notes = "ATR-72 segment: D maps to Y cabin, earns at D-class rate"
+            note_parts.append("ATR-72 segment: D maps to Y cabin, earns at D-class rate")
+
+        # Plain-language earning explanation (band vs 50% partners, or fallback drop)
+        explanation = self._earning_note(carrier, booking_class, rate, d_rate)
+        if explanation:
+            note_parts.append(explanation)
 
         return NTPEstimate(
             segment_index=segment_index,
@@ -77,8 +94,41 @@ class NTPCalculator:
             rate=rate,
             estimated_ntp=round(ntp, 1),
             confidence="calculated",
-            notes=notes,
+            notes="; ".join(note_parts),
         )
+
+    def _earning_note(
+        self, carrier: str, booking_class: str, rate: float, d_rate: float
+    ) -> str:
+        """Explain a distance-carrier's earning rate in plain language.
+
+        Two cases the user cares about:
+        - The business-primary (D) bucket on a sub-50% carrier — e.g. CX/QF/MH
+          earn 25% (half) and WY earns 12.5% (a quarter) of a 50%-band partner
+          (QR/JL/AY).
+        - A non-D bucket (e.g. a Rule 3015 B/H business fallback) that earns far
+          less than D on the same carrier.
+        """
+        if booking_class == "D":
+            if d_rate and d_rate < _TOP_BUSINESS_RATE:
+                if d_rate == _TOP_BUSINESS_RATE / 2:
+                    frac = "half"
+                elif d_rate == _TOP_BUSINESS_RATE / 4:
+                    frac = "a quarter"
+                else:
+                    frac = f"{d_rate / _TOP_BUSINESS_RATE:.0%}"
+                return (
+                    f"{carrier} business (D) earns {_pct(d_rate)} of miles — "
+                    f"{frac} of a 50%-band partner (QR/JL/AY)"
+                )
+            return ""
+        # Non-D bucket: flag the earning drop vs D on the same carrier.
+        if d_rate and rate < d_rate:
+            return (
+                f"booked {booking_class}: earns {_pct(rate)} of miles "
+                f"(D on {carrier} earns {_pct(d_rate)})"
+            )
+        return ""
 
     # ------------------------------------------------------------------
     # Revenue-based NTP
@@ -147,7 +197,8 @@ class NTPCalculator:
 
         Args:
             itinerary: The parsed itinerary.
-            booking_class: The booking class for distance-based calculation.
+            booking_class: Itinerary-wide default RBD for distance-based earning.
+                Overridden per segment by ``Segment.booking_class`` when set.
             total_fare_usd: Total fare in USD. If None, looked up from fares.yaml.
 
         Returns:
@@ -191,13 +242,18 @@ class NTPCalculator:
 
             carrier = seg.carrier or ""
 
+            # Per-segment RBD overrides the itinerary-wide default. A segment
+            # booked in a Rule 3015 fallback (e.g. B) earns at that class's rate,
+            # not D's — this is where the tool used to silently over-count.
+            seg_class = seg.booking_class or booking_class
+
             if carrier in self._revenue_carriers:
                 est = self._revenue_based(i, seg, dist, total_fare_usd, total_distance)
             elif carrier in self._distance_carriers:
-                est = self._distance_based(i, seg, dist, booking_class)
+                est = self._distance_based(i, seg, dist, seg_class)
             else:
                 # Unknown carrier — attempt distance-based with 0 rate
-                est = self._distance_based(i, seg, dist, booking_class)
+                est = self._distance_based(i, seg, dist, seg_class)
                 est.notes = f"Unknown carrier {carrier}; no NTP rate found"
 
             results.append(est)

@@ -57,6 +57,12 @@ class TestTicket:
         assert Ticket(type="LONE4", cabin="economy", origin="CAI").fare_prefix == "L"
         assert Ticket(type="AONE4", cabin="first", origin="CAI").fare_prefix == "A"
 
+    def test_fare_basis(self):
+        """fare_basis equals the ticket type verbatim (the filed OWE fare basis)."""
+        assert Ticket(type="DONE4", cabin="business", origin="CAI").fare_basis == "DONE4"
+        assert Ticket(type="AONE3", cabin="first", origin="CAI").fare_basis == "AONE3"
+        assert Ticket(type="LONE5", cabin="economy", origin="OSL").fare_basis == "LONE5"
+
     def test_plating_carrier_uppercase(self):
         t = Ticket(type="DONE4", cabin="business", origin="CAI", plating_carrier="aa")
         assert t.plating_carrier == "AA"

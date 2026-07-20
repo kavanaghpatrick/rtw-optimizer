@@ -18,6 +18,13 @@ from rtw.models import CabinClass, Itinerary, SegmentType
 
 _DATA_DIR = Path(__file__).parent / "data"
 
+# Round-the-world global indicator and the mandatory ticket endorsement are
+# first-party facts, quoted verbatim from carrier/alliance agent references
+# (Qantas oneworld clue card; oneworld alliance Rule 3015 §18). See
+# docs/kb-owe-rtw-gds-firstparty.md.
+_RTW_GLOBAL_INDICATOR = "RW"
+_RTW_ENDORSEMENT = "VALID ON ONEWORLD ONLY / NON REF"
+
 
 # --- Data Models ---
 
@@ -350,45 +357,54 @@ class BookingGenerator:
             return "01JAN"
         return d.strftime("%d%b").upper()
 
+    def _first_flown_line(self, itinerary: Itinerary) -> int:
+        """1-based PNR line number of the first flown (non-surface) segment.
+
+        The RTW global indicator attaches to the first flight sector
+        (``/S{N}RW``); the Qantas oneworld clue card notes verbatim that
+        "'2' refers to the 1st flight sector in the itinerary". Surface
+        sectors occupy a PNR line (ARNK) and therefore count in the
+        numbering, so a leading surface sector shifts N to 2.
+        """
+        for i, seg in enumerate(itinerary.segments):
+            if not seg.is_surface:
+                return i + 1
+        return 1
+
     def _gds_commands(self, itinerary: Itinerary) -> list[str]:
-        """Generate Amadeus GDS commands for the itinerary."""
+        """Amadeus cryptic entries that identify and price the itinerary as a
+        oneworld Explorer round-the-world fare.
+
+        Only the two first-party-verified RTW entries are emitted:
+
+        - ``FQD{O}{O}/VRW/{date}`` — display the published RTW fare (origin
+          back to origin; ``/VRW`` is the round-the-world global indicator).
+        - ``FXP/S{N}RW/A-{fare_basis}`` — price the PNR as a round-the-world
+          *specified* fare, attaching the RW global indicator to the first
+          flown segment and forcing the OWE fare basis (DONE4, AONE3, ...).
+
+        Both are quoted from carrier/alliance agent references
+        (docs/kb-owe-rtw-gds-firstparty.md). Bare ``FXP`` is deliberately not
+        used: the fare owner publishes "auto-pricing available: No", so
+        auto-pricing never builds the RTW fare — the ``/S{N}RW`` +
+        ``/A-{fare_basis}`` qualifiers are what make it an RTW ticket.
+
+        Per-segment sells (SS), surface sectors (ARNK), the OSI advisory, and
+        the validating-carrier element (FV / ``/R,VC-``) are intentionally
+        omitted: they are standard Amadeus plumbing not covered by any
+        first-party source and must be confirmed on a live Amadeus terminal
+        before being emitted. The per-segment booking instructions are already
+        provided in the phone script.
+        """
         t = itinerary.ticket
         origin = t.origin
-        cabin = t.cabin
-        plating = t.plating_carrier or "AA"
         departure_date = self._format_gds_date(t.departure)
+        first_flown = self._first_flown_line(itinerary)
 
-        commands: list[str] = []
-
-        # FQD: fare display (round-trip same city)
-        commands.append(f"FQD{origin}{origin}/VRW/D{departure_date}")
-
-        # Segment entries
-        for i, seg in enumerate(itinerary.segments):
-            if seg.is_surface:
-                # Surface shown as ARNK (arrival not known)
-                commands.append("ARNK")
-                continue
-
-            booking_class = self._get_booking_class(seg.carrier, cabin) or "D"
-            date_str = self._format_gds_date(seg.date)
-            flight_str = seg.flight or f"{seg.carrier}0000"
-
-            # SS = sell segment: SS[class][count] [flight] [date] [city pair]
-            commands.append(
-                f"SS {booking_class}1 {flight_str} {date_str} {seg.from_airport}{seg.to_airport}"
-            )
-
-        # FXP: pricing
-        commands.append("FXP")
-
-        # OSI: other service information
-        commands.append("OSI YY OW RTW")
-
-        # Plating carrier override
-        commands.append(f"/R,VC-{plating}")
-
-        return commands
+        return [
+            f"FQD{origin}{origin}/V{_RTW_GLOBAL_INDICATOR}/{departure_date}",
+            f"FXP/S{first_flown}{_RTW_GLOBAL_INDICATOR}/A-{t.fare_basis}",
+        ]
 
     # --- Full generation (T034) ---
 
@@ -414,6 +430,24 @@ class BookingGenerator:
                 f"First segment date ({itinerary.ticket.departure.strftime('%d %b %Y')}) "
                 f"is locked after ticketing. Other dates remain flexible."
             )
+
+        # RTW ticketing notes (first-party: docs/kb-owe-rtw-gds-firstparty.md)
+        all_warnings.append(
+            f"Endorsement required (Rule 3015 §18): {_RTW_ENDORSEMENT}."
+        )
+        first_flown = self._first_flown_line(itinerary)
+        all_warnings.append(
+            f"FXP/S{first_flown}RW: 'S{first_flown}' targets the first flown "
+            f"segment's line in the built PNR (surface/ARNK lines count). "
+            f"Verify against the live PNR before pricing."
+        )
+        all_warnings.append(
+            "GDS list shows only the first-party-verified RTW entries (FQD fare "
+            "display + FXP RTW pricing). Segment sells and PNR-build entries "
+            "(SS/ARNK/OSI/FV) are given per-segment in the phone script above and "
+            "omitted from the cryptic list pending live-terminal confirmation "
+            "(docs/kb-owe-rtw-gds-firstparty.md)."
+        )
 
         return BookingScript(
             opening=opening,
