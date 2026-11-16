@@ -64,17 +64,22 @@ class OriginContinentStopoverRule:
         count = context.stopovers_per_continent.get(origin_cont, 0)
 
         if count > 2:
-            # Check if this is the MAD-type ambiguity (return leg stopovers)
+            # Rule 3015 §6: hard maximum of 2 stopovers in the continent of origin.
+            involved = [
+                i
+                for i, seg in enumerate(itinerary.segments)
+                if seg.is_stopover and get_continent(seg.to_airport) == origin_cont
+            ]
             return [
                 RuleResult(
                     rule_id=self.rule_id,
                     rule_name=self.rule_name,
                     rule_reference=self.rule_reference,
                     passed=False,
-                    severity=Severity.WARNING,
-                    message=f"{count} stopovers in origin continent {origin_cont.value} (limit: 2). "
-                    f"Verify with AA RTW desk whether return-leg stopovers count.",
-                    fix_suggestion="Make intermediate return stops into transits (<24h) or confirm exemption with booking desk.",
+                    severity=Severity.VIOLATION,
+                    message=f"{count} stopovers in origin continent {origin_cont.value} (limit: 2).",
+                    fix_suggestion="Convert excess origin-continent stopovers to transits (<24h).",
+                    segments_involved=involved,
                 )
             ]
 

@@ -252,7 +252,9 @@ class TestHemisphereRevisit:
 
 class TestEuMeAfricaZone:
     """EuMeAfricaZoneRule: when ALL intercontinental flights touching Africa
-    go to/from EU_ME, South Africa (ZA) and Mauritius (MU) airports are excluded."""
+    go to/from the Europe zone of EU_ME, South Africa (ZA) and Mauritius (MU)
+    airports are excluded. Middle East zone (incl. Egypt, Libya, Sudan)
+    connections disable the restriction."""
 
     def test_no_africa_segments_passes(self):
         """No Africa segments at all. CAI is EU_ME (Egypt), so rule doesn't apply."""
@@ -283,30 +285,30 @@ class TestEuMeAfricaZone:
         assert any("does not apply" in r.message for r in results)
 
     def test_africa_only_eu_me_no_za_passes(self):
-        """All Africa IC flights go to/from EU_ME, but no ZA/MU airports. Pass."""
+        """All Africa IC flights go to/from the Europe zone, but no ZA/MU airports. Pass."""
         segs = [
-            {"from": "CAI", "to": "NBO", "carrier": "QR", "type": "stopover"},
+            {"from": "LHR", "to": "NBO", "carrier": "BA", "type": "stopover"},
             {"from": "NBO", "to": "LHR", "carrier": "BA", "type": "stopover"},
             {"from": "LHR", "to": "NRT", "carrier": "JL", "type": "stopover"},
             {"from": "NRT", "to": "LAX", "carrier": "JL", "type": "stopover"},
-            {"from": "LAX", "to": "CAI", "carrier": "BA", "type": "final"},
+            {"from": "LAX", "to": "LHR", "carrier": "BA", "type": "final"},
         ]
-        itin = _make_itinerary(segs, origin="CAI")
+        itin = _make_itinerary(segs, origin="LHR")
         ctx = build_context(itin)
         results = EuMeAfricaZoneRule().check(itin, ctx)
         assert all(r.passed for r in results)
         assert any("no excluded airports" in r.message for r in results)
 
     def test_africa_only_eu_me_with_jnb_fails(self):
-        """All Africa IC flights to/from EU_ME and JNB (South Africa) present. VIOLATION."""
+        """All Africa IC flights to/from the Europe zone and JNB (South Africa) present. VIOLATION."""
         segs = [
-            {"from": "CAI", "to": "JNB", "carrier": "QR", "type": "stopover"},
+            {"from": "LHR", "to": "JNB", "carrier": "BA", "type": "stopover"},
             {"from": "JNB", "to": "LHR", "carrier": "BA", "type": "stopover"},
             {"from": "LHR", "to": "NRT", "carrier": "JL", "type": "stopover"},
             {"from": "NRT", "to": "LAX", "carrier": "JL", "type": "stopover"},
-            {"from": "LAX", "to": "CAI", "carrier": "BA", "type": "final"},
+            {"from": "LAX", "to": "LHR", "carrier": "BA", "type": "final"},
         ]
-        itin = _make_itinerary(segs, origin="CAI")
+        itin = _make_itinerary(segs, origin="LHR")
         ctx = build_context(itin)
         results = EuMeAfricaZoneRule().check(itin, ctx)
         assert any(not r.passed for r in results)
@@ -314,15 +316,15 @@ class TestEuMeAfricaZone:
         assert any("South Africa" in r.message for r in results)
 
     def test_africa_only_eu_me_with_mauritius_fails(self):
-        """All Africa IC flights to/from EU_ME and MRU (Mauritius) present. VIOLATION."""
+        """All Africa IC flights to/from the Europe zone and MRU (Mauritius) present. VIOLATION."""
         segs = [
-            {"from": "CAI", "to": "MRU", "carrier": "QR", "type": "stopover"},
+            {"from": "MAD", "to": "MRU", "carrier": "IB", "type": "stopover"},
             {"from": "MRU", "to": "LHR", "carrier": "BA", "type": "stopover"},
             {"from": "LHR", "to": "NRT", "carrier": "JL", "type": "stopover"},
             {"from": "NRT", "to": "LAX", "carrier": "JL", "type": "stopover"},
-            {"from": "LAX", "to": "CAI", "carrier": "BA", "type": "final"},
+            {"from": "LAX", "to": "MAD", "carrier": "IB", "type": "final"},
         ]
-        itin = _make_itinerary(segs, origin="CAI")
+        itin = _make_itinerary(segs, origin="MAD")
         ctx = build_context(itin)
         results = EuMeAfricaZoneRule().check(itin, ctx)
         assert any(not r.passed for r in results)
@@ -337,6 +339,74 @@ class TestEuMeAfricaZone:
         with open("tests/fixtures/flyertalk_jnb_business.yaml") as f:
             data = yaml.safe_load(f)
         itin = Itinerary(**data)
+        ctx = build_context(itin)
+        results = EuMeAfricaZoneRule().check(itin, ctx)
+        assert all(r.passed for r in results)
+        assert any("does not apply" in r.message for r in results)
+
+    def test_lhr_doh_jnb_doh_middle_east_routing_passes(self):
+        """Regression: LHR-DOH-JNB-DOH-HKG-LAX-JFK-LHR. Both Africa IC flights
+        are to/from Doha (Middle East zone), so ZA is permitted."""
+        segs = [
+            {"from": "LHR", "to": "DOH", "carrier": "QR", "type": "stopover"},
+            {"from": "DOH", "to": "JNB", "carrier": "QR", "type": "stopover"},
+            {"from": "JNB", "to": "DOH", "carrier": "QR", "type": "transit"},
+            {"from": "DOH", "to": "HKG", "carrier": "QR", "type": "stopover"},
+            {"from": "HKG", "to": "LAX", "carrier": "CX", "type": "stopover"},
+            {"from": "LAX", "to": "JFK", "carrier": "AA", "type": "stopover"},
+            {"from": "JFK", "to": "LHR", "carrier": "BA", "type": "final"},
+        ]
+        itin = _make_itinerary(segs, origin="LHR")
+        ctx = build_context(itin)
+        results = EuMeAfricaZoneRule().check(itin, ctx)
+        assert all(r.passed for r in results)
+        assert any("does not apply" in r.message for r in results)
+
+    def test_lhr_jnb_lhr_europe_both_directions_fails(self):
+        """LHR-JNB-LHR: Europe zone in both directions, ZA excluded.
+        Each airport is listed once in the message."""
+        segs = [
+            {"from": "LHR", "to": "JNB", "carrier": "BA", "type": "stopover"},
+            {"from": "JNB", "to": "LHR", "carrier": "BA", "type": "stopover"},
+            {"from": "LHR", "to": "HKG", "carrier": "CX", "type": "stopover"},
+            {"from": "HKG", "to": "LAX", "carrier": "CX", "type": "stopover"},
+            {"from": "LAX", "to": "LHR", "carrier": "BA", "type": "final"},
+        ]
+        itin = _make_itinerary(segs, origin="LHR")
+        ctx = build_context(itin)
+        results = EuMeAfricaZoneRule().check(itin, ctx)
+        failed = [r for r in results if not r.passed]
+        assert failed
+        assert failed[0].severity == Severity.VIOLATION
+        assert "Europe zone" in failed[0].message
+        assert failed[0].message.count("JNB") == 1
+        assert failed[0].segments_involved == [0, 1]
+
+    def test_mad_jnb_doh_mixed_zones_passes(self):
+        """MAD-JNB-DOH: one Europe zone end, one Middle East zone end. ZA permitted."""
+        segs = [
+            {"from": "MAD", "to": "JNB", "carrier": "IB", "type": "stopover"},
+            {"from": "JNB", "to": "DOH", "carrier": "QR", "type": "stopover"},
+            {"from": "DOH", "to": "HKG", "carrier": "QR", "type": "stopover"},
+            {"from": "HKG", "to": "LAX", "carrier": "CX", "type": "stopover"},
+            {"from": "LAX", "to": "MAD", "carrier": "IB", "type": "final"},
+        ]
+        itin = _make_itinerary(segs, origin="MAD")
+        ctx = build_context(itin)
+        results = EuMeAfricaZoneRule().check(itin, ctx)
+        assert all(r.passed for r in results)
+        assert any("does not apply" in r.message for r in results)
+
+    def test_cai_jnb_cai_egypt_is_middle_east_zone_passes(self):
+        """CAI-JNB-CAI: Egypt is in the Middle East zone, so ZA is permitted."""
+        segs = [
+            {"from": "CAI", "to": "JNB", "carrier": "QR", "type": "stopover"},
+            {"from": "JNB", "to": "CAI", "carrier": "QR", "type": "stopover"},
+            {"from": "CAI", "to": "NRT", "carrier": "QR", "type": "stopover"},
+            {"from": "NRT", "to": "LAX", "carrier": "JL", "type": "stopover"},
+            {"from": "LAX", "to": "CAI", "carrier": "BA", "type": "final"},
+        ]
+        itin = _make_itinerary(segs, origin="CAI")
         ctx = build_context(itin)
         results = EuMeAfricaZoneRule().check(itin, ctx)
         assert all(r.passed for r in results)

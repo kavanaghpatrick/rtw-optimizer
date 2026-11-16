@@ -135,6 +135,38 @@ class ContinentCountRule:
         actual = len(context.continents_visited)
 
         if actual != expected:
+            continents = ", ".join(c.value for c in context.continents_visited)
+            if 3 <= actual <= 6:
+                suggested = f"{itinerary.ticket.fare_prefix}ONE{actual}"
+                ticket_advice = f"Ticket as {suggested}"
+            else:
+                suggested = None
+                ticket_advice = (
+                    f"No oneworld Explorer fare covers {actual} continents (3-6 only); "
+                    "change the routing"
+                )
+
+            if actual > expected:
+                # Rule 3015 §0/§16: fare is priced on continents visited, so an
+                # under-labelled ticket is under-priced and cannot be issued.
+                must = f"this must be ticketed as {suggested}" if suggested else (
+                    "no oneworld Explorer fare covers this routing"
+                )
+                return [
+                    RuleResult(
+                        rule_id=self.rule_id,
+                        rule_name=self.rule_name,
+                        rule_reference=self.rule_reference,
+                        passed=False,
+                        severity=Severity.VIOLATION,
+                        message=f"Itinerary visits {actual} continents but ticket is for "
+                        f"{expected}; fare is priced on continents visited (Rule 3015 §16), "
+                        f"so {must}. Continents: {continents}.",
+                        fix_suggestion=f"{ticket_advice}, or modify routing to visit "
+                        f"exactly {expected} continents.",
+                    )
+                ]
+
             return [
                 RuleResult(
                     rule_id=self.rule_id,
@@ -142,10 +174,14 @@ class ContinentCountRule:
                     rule_reference=self.rule_reference,
                     passed=False,
                     severity=Severity.WARNING,
-                    message=f"Visiting {actual} continents but ticket is for {expected}. "
-                    f"Continents: {', '.join(c.value for c in context.continents_visited)}.",
-                    fix_suggestion=f"Adjust ticket type to {'DONE' if itinerary.ticket.fare_prefix == 'D' else 'LONE'}{actual} "
-                    f"or modify routing to visit exactly {expected} continents.",
+                    message=f"Visiting {actual} continents but ticket is for {expected} "
+                    f"(overpaying). Continents: {continents}.",
+                    fix_suggestion=(
+                        f"{ticket_advice} to avoid overpaying, or add continents to "
+                        f"use the full {expected}."
+                        if suggested
+                        else f"{ticket_advice}."
+                    ),
                 )
             ]
 

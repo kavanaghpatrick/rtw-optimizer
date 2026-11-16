@@ -73,11 +73,17 @@ class TestValidationContext:
         assert Continent.SWP in ctx.continents_visited
         assert Continent.N_AMERICA in ctx.continents_visited
 
-    def test_same_city_pairs_detected(self, v3_itinerary):
-        itin = Itinerary(**v3_itinerary)
+    def test_same_city_pairs_detected(self, v3_same_city_itinerary):
+        itin = Itinerary(**v3_same_city_itinerary)
         ctx = build_context(itin)
         # NRT->HND and TSA->TPE should be detected as same-city pairs
-        assert len(ctx.same_city_pairs) >= 2
+        assert len(ctx.same_city_pairs) == 2
+        assert ctx.implicit_surface_count == 2
+
+    def test_v3_has_no_same_city_pairs(self, v3_itinerary):
+        ctx = build_context(Itinerary(**v3_itinerary))
+        assert ctx.same_city_pairs == []
+        assert ctx.implicit_surface_count == 0
 
 
 class TestValidator:

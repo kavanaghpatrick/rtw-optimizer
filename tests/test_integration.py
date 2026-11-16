@@ -269,13 +269,12 @@ class TestV3RuleDetails:
         return results
 
     def test_segment_count_passes(self):
-        """segment_count: 16 segments passes (max is 16)."""
+        """segment_count: 16 segments, no implicit airport changes, passes (max 16)."""
         results = self._get_results("segment_count")
         assert all(r.passed for r in results), (
             f"segment_count should pass: {[r.message for r in results if not r.passed]}"
         )
-        # Check message references 16
-        assert any("16" in r.message for r in results)
+        assert [r.message for r in results] == ["16 segments (limit: 16)."]
 
     def test_per_continent_limit_passes(self):
         """per_continent_limit: all continents within their limits."""
@@ -311,36 +310,19 @@ class TestV3RuleDetails:
         results = self._get_results("minimum_stopovers")
         assert all(r.passed for r in results)
 
-    def test_origin_continent_stopovers_warning(self):
-        """origin_continent_stopovers: WARNING expected for MAD stopover in EU_ME."""
+    def test_origin_continent_stopovers_at_limit(self):
+        """origin_continent_stopovers: V3 has AMM + DOH in EU_ME (MAD is a transit) = 2/2."""
         results = self._get_results("origin_continent_stopovers")
-        # V3 has 3 stopovers in EU_ME: AMM, DOH, MAD (CAI is origin, MAD is stopover)
-        # This should trigger a WARNING (not a VIOLATION)
-        warnings = [r for r in results if not r.passed and r.severity == Severity.WARNING]
-        assert len(warnings) >= 1, (
-            f"Expected at least 1 WARNING for origin_continent_stopovers, "
-            f"got: {[(r.passed, r.severity, r.message) for r in results]}"
+        assert all(r.passed for r in results), (
+            f"origin_continent_stopovers should pass: {[r.message for r in results]}"
         )
-        # Must NOT be a VIOLATION
-        violations = [r for r in results if not r.passed and r.severity == Severity.VIOLATION]
-        assert len(violations) == 0, (
-            f"origin_continent_stopovers should not VIOLATE, got: {[r.message for r in violations]}"
-        )
+        assert any("2/2" in r.message for r in results)
 
-    def test_same_city_resolution_detected(self):
-        """same_city_resolution: NRT/HND and TSA/TPE detected as same-city."""
+    def test_same_city_resolution_none(self):
+        """same_city_resolution: V3 flies the same airport in and out of each city."""
         results = self._get_results("same_city_resolution")
-        messages = " ".join(r.message for r in results)
-        # NRT/HND pair
-        assert "NRT" in messages and "HND" in messages, (
-            f"Expected NRT/HND same-city pair in messages: {messages}"
-        )
-        # TSA/TPE pair
-        assert "TSA" in messages and "TPE" in messages, (
-            f"Expected TSA/TPE same-city pair in messages: {messages}"
-        )
-        # All should pass (same-city is INFO, not a failure)
         assert all(r.passed for r in results)
+        assert "No same-city airport changes" in results[0].message
 
     def test_hemisphere_revisit_passes(self):
         """hemisphere_revisit: no backtracking detected."""
@@ -398,10 +380,9 @@ class TestV3RuleDetails:
         results = self._get_results("transcontinental_us")
         assert all(r.passed for r in results)
 
-    def test_no_violations_only_warnings(self):
-        """Overall: 0 violations, at least 1 warning."""
+    def test_no_violations(self):
+        """Overall: 0 violations; any warnings are WARNING severity."""
         assert self.report.violation_count == 0
-        assert self.report.warning_count >= 1
         # All warnings should be WARNING severity
         for w in self.report.warnings:
             assert w.severity == Severity.WARNING
@@ -489,39 +470,9 @@ class TestV3Geography:
         # Last should be TC2 (return to EU_ME)
         assert tc_seq[-1] == TariffConference.TC2, f"Last TC should be TC2, got {tc_seq[-1]}"
 
-    def test_same_city_pairs_count(self):
-        """Exactly 2 same-city pairs: NRT/HND (Tokyo) and TSA/TPE (Taipei)."""
-        assert len(self.ctx.same_city_pairs) == 2, (
-            f"Expected 2 same-city pairs, got {len(self.ctx.same_city_pairs)}"
-        )
-
-    def test_same_city_nrt_hnd(self):
-        """NRT->HND is a same-city pair (Tokyo)."""
-        # Segment 2: DOH->NRT, Segment 3: HND->TSA
-        # Same-city pair at (2, 3)
-        pair_segments = self.ctx.same_city_pairs
-        airports = [
-            (self.itin.segments[a].to_airport, self.itin.segments[b].from_airport)
-            for a, b in pair_segments
-        ]
-        assert ("NRT", "HND") in airports, f"Expected NRT/HND in same-city pairs, got: {airports}"
-
-    def test_same_city_tsa_tpe(self):
-        """TSA->TPE is a same-city pair (Taipei)."""
-        pair_segments = self.ctx.same_city_pairs
-        airports = [
-            (self.itin.segments[a].to_airport, self.itin.segments[b].from_airport)
-            for a, b in pair_segments
-        ]
-        assert ("TSA", "TPE") in airports, f"Expected TSA/TPE in same-city pairs, got: {airports}"
-
-    def test_same_city_not_surface_sectors(self):
-        """Same-city transitions are NOT counted as surface sectors."""
-        # Segments 3 (HND->TSA) and 4 (TPE->HKG) should not be surface
-        seg_3 = self.itin.segments[3]
-        seg_4 = self.itin.segments[4]
-        assert not seg_3.is_surface, f"HND->TSA should not be surface, got type={seg_3.type}"
-        assert not seg_4.is_surface, f"TPE->HKG should not be surface, got type={seg_4.type}"
+    def test_no_same_city_pairs(self):
+        """V3 flies NRT in/out of Tokyo and TPE in/out of Taipei: no airport changes."""
+        assert self.ctx.same_city_pairs == []
 
     def test_origin_continent_is_eu_me(self):
         """Origin (CAI) is in EU_ME."""
@@ -558,9 +509,9 @@ class TestV3Geography:
     def test_stopovers_per_continent(self):
         """Verify stopovers per continent match expectations."""
         spc = self.ctx.stopovers_per_continent
-        # EU_ME stopovers: AMM (#0), DOH (#1), MAD (#14) = 3
-        assert spc.get(Continent.EU_ME, 0) >= 3, (
-            f"Expected >= 3 EU_ME stopovers, got {spc.get(Continent.EU_ME, 0)}"
+        # EU_ME stopovers: AMM (#0), DOH (#1) = 2 (MAD #14 is a transit)
+        assert spc.get(Continent.EU_ME, 0) == 2, (
+            f"Expected 2 EU_ME stopovers, got {spc.get(Continent.EU_ME, 0)}"
         )
         # Asia stopovers: NRT (#2), TSA (#3), HKG (#4) = 3
         assert spc.get(Continent.ASIA, 0) >= 2
@@ -568,6 +519,62 @@ class TestV3Geography:
         assert spc.get(Continent.SWP, 0) >= 1
         # N_America stopovers: SFO (#10), JFK (#10 area), MEX (#13) = 2-3
         assert spc.get(Continent.N_AMERICA, 0) >= 2
+
+
+# ---------------------------------------------------------------------------
+# TestV3SameCityGaps — Original V3 with airport changes (invalid, 18 segments)
+# ---------------------------------------------------------------------------
+
+
+class TestV3SameCityGaps:
+    """Original V3 with NRT->HND and TSA->TPE airport changes (Rule 3015 §4).
+
+    Each airport change is an implicit surface sector: 16 listed + 2 = 18
+    segments, and Asia = 3 listed + 2 implicit = 5 (limit 4).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, v3_same_city_itinerary):
+        self.itin = _build_itinerary(v3_same_city_itinerary)
+        self.ctx = build_context(self.itin)
+        self.report = Validator().validate(self.itin)
+
+    def _results(self, rule_id):
+        return [r for r in self.report.results if r.rule_id == rule_id]
+
+    def test_same_city_pairs(self):
+        airports = [
+            (self.itin.segments[a].to_airport, self.itin.segments[b].from_airport)
+            for a, b in self.ctx.same_city_pairs
+        ]
+        assert airports == [("NRT", "HND"), ("TSA", "TPE")]
+        assert self.ctx.implicit_surface_count == 2
+
+    def test_listed_segments_not_marked_surface(self):
+        """The gaps are implicit; the listed flights themselves stay flown."""
+        assert not self.itin.segments[3].is_surface
+        assert not self.itin.segments[4].is_surface
+
+    def test_segment_count_fails_with_18(self):
+        results = self._results("segment_count")
+        assert len(results) == 1 and not results[0].passed
+        assert "= 18 segments" in results[0].message
+
+    def test_asia_limit_exceeded_by_gaps(self):
+        assert self.ctx.segments_per_continent[Continent.ASIA] == 5
+        asia = [r for r in self._results("per_continent_limit") if r.message.startswith("Asia")]
+        assert len(asia) == 1 and not asia[0].passed
+        assert "2 implicit airport-change surface sectors" in asia[0].message
+
+    def test_same_city_resolution_warns(self):
+        results = self._results("same_city_resolution")
+        assert len(results) == 2
+        assert all(not r.passed and r.severity == Severity.WARNING for r in results)
+        messages = " ".join(r.message for r in results)
+        assert "NRT->HND" in messages and "TSA->TPE" in messages
+
+    def test_report_fails(self):
+        assert not self.report.passed
 
 
 # ---------------------------------------------------------------------------

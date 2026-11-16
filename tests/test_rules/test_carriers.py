@@ -75,6 +75,78 @@ class TestContinentCount:
         passed_results = [r for r in results if r.passed]
         assert len(passed_results) >= 0  # May pass or warn depending on continent resolution
 
+    # LHR-JNB-SYD-HKG-LAX-LHR: EU_ME, Africa, SWP, Asia, N_America = 5 continents
+    _FIVE_CONT = [
+        {"from": "LHR", "to": "JNB", "carrier": "BA"},
+        {"from": "JNB", "to": "SYD", "carrier": "QF"},
+        {"from": "SYD", "to": "HKG", "carrier": "CX"},
+        {"from": "HKG", "to": "LAX", "carrier": "CX"},
+        {"from": "LAX", "to": "LHR", "carrier": "BA"},
+    ]
+    # LHR-NRT-JFK-LHR: EU_ME, Asia, N_America = 3 continents
+    _THREE_CONT = [
+        {"from": "LHR", "to": "NRT", "carrier": "JL"},
+        {"from": "NRT", "to": "JFK", "carrier": "JL"},
+        {"from": "JFK", "to": "LHR", "carrier": "BA"},
+    ]
+
+    def test_done4_visiting_5_continents_is_violation(self):
+        """Under-priced ticket (more continents than paid for) must fail."""
+        from rtw.models import Severity
+        from rtw.validator import Validator
+
+        itin = _make_itinerary(self._FIVE_CONT, origin="LHR", ticket_type="DONE4")
+        results = ContinentCountRule().check(itin, build_context(itin))
+        assert len(results) == 1
+        assert not results[0].passed
+        assert results[0].severity == Severity.VIOLATION
+        assert "DONE5" in results[0].message
+        assert "DONE5" in results[0].fix_suggestion
+
+        report = Validator().validate(itin)
+        assert not report.passed
+        assert any(v.rule_id == "continent_count" for v in report.violations)
+
+    def test_done4_visiting_3_continents_warns(self):
+        """Over-priced ticket (fewer continents than paid for) is a warning only."""
+        from rtw.models import Severity
+
+        itin = _make_itinerary(self._THREE_CONT, origin="LHR", ticket_type="DONE4")
+        results = ContinentCountRule().check(itin, build_context(itin))
+        assert len(results) == 1
+        assert not results[0].passed
+        assert results[0].severity == Severity.WARNING
+        assert "DONE3" in results[0].fix_suggestion
+
+    def test_aone_mismatch_suggests_aone(self):
+        """First-class mismatch suggests AONE{n}, never LONE/DONE."""
+        itin = Itinerary(
+            ticket=Ticket(type="AONE4", cabin="first", origin="LHR"),
+            segments=[Segment(**s) for s in self._FIVE_CONT],
+        )
+        results = ContinentCountRule().check(itin, build_context(itin))
+        assert "AONE5" in results[0].fix_suggestion
+        assert "LONE" not in results[0].fix_suggestion
+        assert "DONE" not in results[0].fix_suggestion
+
+        itin3 = Itinerary(
+            ticket=Ticket(type="AONE4", cabin="first", origin="LHR"),
+            segments=[Segment(**s) for s in self._THREE_CONT],
+        )
+        results3 = ContinentCountRule().check(itin3, build_context(itin3))
+        assert "AONE3" in results3[0].fix_suggestion
+
+    def test_two_continents_no_fare_suggested(self):
+        """Below 3 continents there is no oneworld Explorer fare to suggest."""
+        segs = [
+            {"from": "LHR", "to": "JFK", "carrier": "BA"},
+            {"from": "JFK", "to": "LHR", "carrier": "BA"},
+        ]
+        itin = _make_itinerary(segs, origin="LHR", ticket_type="DONE3")
+        results = ContinentCountRule().check(itin, build_context(itin))
+        assert "ONE2" not in results[0].fix_suggestion
+        assert "No oneworld Explorer fare" in results[0].fix_suggestion
+
 
 class TestWYCarrier:
     """Oman Air (WY) carrier data and eligibility."""
@@ -103,7 +175,8 @@ class TestWYCarrier:
         assert wy.get("alliance") == "oneworld"
         assert wy.get("eligible") is True
         assert wy.get("ntp_method") == "distance"
-        assert wy.get("rtw_booking_class") == "D"
+        assert wy["rtw_booking_classes"]["business"] == "D"
+        assert wy["rtw_booking_classes"]["first"] == "A"
         assert wy.get("yq_tier") is not None
         assert wy.get("yq_estimate_per_segment") is not None
 
@@ -135,7 +208,7 @@ class TestHACarrier:
         assert ha.get("alliance") == "oneworld"
         assert ha.get("eligible") is True
         assert ha.get("ntp_method") in ("distance", "revenue")
-        assert ha.get("rtw_booking_class") is not None
+        assert ha.get("rtw_booking_classes") is not None
         assert ha.get("yq_tier") is not None
         assert ha.get("yq_estimate_per_segment") is not None
 
@@ -205,7 +278,7 @@ class TestFallbackClassSchema:
 
     def test_aa_primary_d_fallback_h(self):
         aa = self._carriers()["AA"]
-        assert aa["rtw_booking_class"] == "D"
+        assert aa["rtw_booking_classes"]["business"] == "D"
         assert aa["rtw_fallback_class"] == "H"
 
     def test_every_eligible_carrier_has_fallback(self):

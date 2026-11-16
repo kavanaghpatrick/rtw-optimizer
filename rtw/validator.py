@@ -32,8 +32,12 @@ class ValidationContext:
     segments_per_continent: dict[Continent, int] = field(default_factory=dict)
     # Stopovers per continent
     stopovers_per_continent: dict[Continent, int] = field(default_factory=dict)
-    # Same-city pairs resolved
+    # Same-city pairs resolved: (i, i+1) where segment i lands at one airport
+    # and segment i+1 departs a different airport in the same city. Each is an
+    # implicit surface sector (Rule 3015 §4/§18) counting toward limits.
     same_city_pairs: list[tuple[int, int]] = field(default_factory=list)
+    # Number of implicit airport-change surface sectors (== len(same_city_pairs))
+    implicit_surface_count: int = 0
     # Direction (eastbound or westbound based on TC sequence)
     tc_sequence: list[TariffConference] = field(default_factory=list)
     # Per-segment intercontinental flag (from_continent != to_continent)
@@ -50,6 +54,33 @@ class ValidationContext:
     via_continents: list[Continent] = field(default_factory=list)
     # Segments that triggered via-continent detection {continent: [(seg_index, via_airport)]}
     via_continent_segments: dict[Continent, list[tuple[int, str]]] = field(default_factory=dict)
+    # Airports whose continent could not be resolved, mapped to the segment
+    # indices they appear in (-1 = ticket origin). Non-empty means continent
+    # counts, intercontinental flags and direction checks are unreliable.
+    unknown_continent_airports: dict[str, list[int]] = field(default_factory=dict)
+
+
+def find_same_city_gaps(segments) -> list[tuple[int, int]]:
+    """Return (i, i+1) index pairs where segment i arrives at one airport and
+    segment i+1 departs a different airport in the same city (e.g. NRT -> HND).
+
+    Rule 3015 §4: "Surface segment: Landing at one airport and departing from a
+    different airport by ground transport. Surface segments count toward the
+    16-segment limit and per-continent limits." §18: intermediate surface
+    sectors "count as one of the 16 segments." Each pair returned here is
+    therefore an implicit surface sector that is not listed as a segment.
+
+    The origin/destination open jaw (e.g. out of LHR, back into LGW) is not a
+    consecutive-segment gap and is never returned here; it is governed by the
+    §7/§18 origin-destination exception list.
+    """
+    pairs: list[tuple[int, int]] = []
+    for i in range(len(segments) - 1):
+        arr = segments[i].to_airport
+        dep = segments[i + 1].from_airport
+        if arr != dep and are_same_city(arr, dep):
+            pairs.append((i, i + 1))
+    return pairs
 
 
 def build_context(itinerary: Itinerary) -> ValidationContext:
@@ -60,6 +91,10 @@ def build_context(itinerary: Itinerary) -> ValidationContext:
     ctx.origin_continent = get_continent(itinerary.ticket.origin)
     if ctx.origin_continent:
         ctx.origin_tc = CONTINENT_TO_TC[ctx.origin_continent]
+    else:
+        ctx.unknown_continent_airports.setdefault(
+            itinerary.ticket.origin.upper(), []
+        ).append(-1)
 
     seen_continents: list[Continent] = []
     segments_per: dict[Continent, int] = {}
@@ -76,9 +111,17 @@ def build_context(itinerary: Itinerary) -> ValidationContext:
         # Determine continent from departure airport
         from_cont = get_continent(seg.from_airport)
         to_cont = get_continent(seg.to_airport)
+        for apt, apt_cont in ((seg.from_airport, from_cont), (seg.to_airport, to_cont)):
+            if apt_cont is None:
+                seen_at = ctx.unknown_continent_airports.setdefault(apt.upper(), [])
+                if i not in seen_at:
+                    seen_at.append(i)
 
-        # Use destination continent for segment assignment
-        cont = to_cont or from_cont
+        # Use destination continent for segment assignment. If it is unknown,
+        # leave the segment unassigned rather than borrowing the departure
+        # continent (which would silently turn an intercontinental flight
+        # into a domestic one); UnknownContinentRule reports it.
+        cont = to_cont
         ctx.segment_continents.append(cont)
 
         # Classify intercontinental: from_continent != to_continent
@@ -121,12 +164,16 @@ def build_context(itinerary: Itinerary) -> ValidationContext:
             ctx.segment_tcs.append(None)
 
     # Detect same-city pairs (consecutive segments where arrival airport
-    # of seg N and departure airport of seg N+1 are same-city but different codes)
-    for i in range(len(itinerary.segments) - 1):
-        arr = itinerary.segments[i].to_airport
-        dep = itinerary.segments[i + 1].from_airport
-        if arr != dep and are_same_city(arr, dep):
-            ctx.same_city_pairs.append((i, i + 1))
+    # of seg N and departure airport of seg N+1 are same-city but different codes).
+    # Each is an implicit surface sector: it counts toward the 16-segment limit
+    # (SegmentCountRule) and, being within one city, is always intra-continental,
+    # so it counts toward that continent's per-continent limit.
+    ctx.same_city_pairs = find_same_city_gaps(itinerary.segments)
+    ctx.implicit_surface_count = len(ctx.same_city_pairs)
+    for seg_idx, _next_idx in ctx.same_city_pairs:
+        gap_cont = get_continent(itinerary.segments[seg_idx].to_airport)
+        if gap_cont:
+            segments_per[gap_cont] = segments_per.get(gap_cont, 0) + 1
 
     ctx.continents_visited = seen_continents
     ctx.segments_per_continent = segments_per
@@ -229,6 +276,7 @@ class Validator:
         import rtw.rules.intercontinental  # noqa: F401
         import rtw.rules.country  # noqa: F401
         import rtw.rules.married  # noqa: F401
+        import rtw.rules.continent_coverage  # noqa: F401
 
     def validate(self, itinerary: Itinerary) -> ValidationReport:
         """Run all rules and return a validation report."""

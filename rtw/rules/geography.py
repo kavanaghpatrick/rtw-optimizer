@@ -1,11 +1,11 @@
 """Geography-specific rules: Hawaii, Alaska, Australia, Transcontinental. Rule 3015 §9-10."""
 
-from rtw.continents import get_country
+from rtw.continents import get_continent, get_country
 from rtw.rules.base import register_rule
 from rtw.models import RuleResult, Severity, Continent
 
 # Hawaii airports
-_HAWAII_AIRPORTS = {"HNL", "OGG", "KOA", "LIH", "ITO"}
+_HAWAII_AIRPORTS = {"HNL", "OGG", "KOA", "LIH", "ITO", "MKK", "LNY", "JHM"}
 # Alaska airports
 _ALASKA_AIRPORTS = {"ANC", "FAI", "JNU", "SIT", "KTN"}
 # US mainland (approximate — for transcontinental check)
@@ -63,6 +63,11 @@ _US_WEST = {
 }
 
 
+def _is_non_hawaii_north_america(airport: str) -> bool:
+    """True for North America airports outside Hawaii (mainland, Canada, Mexico, Alaska)."""
+    return airport not in _HAWAII_AIRPORTS and get_continent(airport) == Continent.N_AMERICA
+
+
 @register_rule
 class HawaiiAlaskaRule:
     """Hawaii backtracking banned. Alaska: only 1 flight to, 1 from."""
@@ -96,6 +101,49 @@ class HawaiiAlaskaRule:
                 visited_hawaii = True
             elif visited_hawaii and seg.from_airport in _HAWAII_AIRPORTS:
                 left_hawaii = True
+
+        # Hawaii side trip check (Rule 3015 §5): mainland -> Hawaii -> mainland.
+        # Treat each continuous run of Hawaii airports as one block and look only
+        # at the flight entering it and the flight leaving it.
+        segs = itinerary.segments
+        i = 0
+        while i < len(segs):
+            entry = segs[i]
+            if not (
+                entry.to_airport in _HAWAII_AIRPORTS
+                and entry.from_airport not in _HAWAII_AIRPORTS
+            ):
+                i += 1
+                continue
+            j = i + 1
+            while j < len(segs) and segs[j].to_airport in _HAWAII_AIRPORTS:
+                j += 1  # interisland hops stay inside the block
+            if j >= len(segs):
+                break  # itinerary ends in Hawaii
+            exit_seg = segs[j]
+            if _is_non_hawaii_north_america(entry.from_airport) and (
+                _is_non_hawaii_north_america(exit_seg.to_airport)
+            ):
+                results.append(
+                    RuleResult(
+                        rule_id=self.rule_id,
+                        rule_name=self.rule_name,
+                        rule_reference=self.rule_reference,
+                        passed=False,
+                        severity=Severity.VIOLATION,
+                        message=(
+                            f"Hawaii side trip {entry.from_airport}-{entry.to_airport} ... "
+                            f"{exit_seg.from_airport}-{exit_seg.to_airport}: backtracking "
+                            "between Hawaii and other points in North America is not permitted."
+                        ),
+                        fix_suggestion=(
+                            "Enter or leave Hawaii on a transpacific flight "
+                            "(e.g. NRT-HNL-LAX) instead of a round trip from North America."
+                        ),
+                        segments_involved=list(range(i, j + 1)),
+                    )
+                )
+            i = j + 1
 
         # Alaska flight count
         to_alaska = sum(

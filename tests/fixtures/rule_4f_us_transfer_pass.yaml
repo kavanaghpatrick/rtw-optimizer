@@ -1,0 +1,54 @@
+# Rule §4(f): US-origin exception to the one intl departure/arrival limit
+# "EXCEPTION: Two permitted for origin USA when one arrival-departure is a
+#  transfer without stopover."
+# PASS case: LAX is a transfer without stopover, so the US exception allows 2 intl departures and 2 intl arrivals
+# Route: JFK-LHR-DOH-HKG-LAX(transit)-MEX-JFK
+# Tests: OriginCountryIntlLimitRule
+
+ticket:
+  type: DONE3
+  cabin: business
+  origin: JFK
+  passengers: 1
+  departure: "2026-09-01"
+
+segments:
+  - from: JFK
+    to: LHR
+    carrier: BA
+    date: "2026-09-01"
+    type: stopover
+    notes: "Intl dep from US #1 (Atlantic crossing)"
+
+  - from: LHR
+    to: DOH
+    carrier: QR
+    date: "2026-09-05"
+    type: stopover
+
+  - from: DOH
+    to: HKG
+    carrier: QR
+    date: "2026-09-09"
+    type: stopover
+
+  - from: HKG
+    to: LAX
+    carrier: CX
+    date: "2026-09-13"
+    type: transit
+    notes: "Intl arrival into US #1 (Pacific crossing); LAX is a transit"
+
+  - from: LAX
+    to: MEX
+    carrier: AA
+    date: "2026-09-14"
+    type: stopover
+    notes: "Intl dep from US #2"
+
+  - from: MEX
+    to: JFK
+    carrier: AA
+    date: "2026-09-18"
+    type: final
+    notes: "Intl arrival into US #2"

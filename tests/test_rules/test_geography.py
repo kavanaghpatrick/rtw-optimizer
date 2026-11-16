@@ -29,6 +29,67 @@ class TestHawaiiAlaska:
         results = HawaiiAlaskaRule().check(itin, ctx)
         assert any(not r.passed for r in results)
 
+    def test_hawaii_reentry_fixture_still_fails(self, hawaii_backtrack_itinerary):
+        itin = Itinerary(**hawaii_backtrack_itinerary)
+        ctx = build_context(itin)
+        results = HawaiiAlaskaRule().check(itin, ctx)
+        assert any(
+            not r.passed and "after leaving" in r.message for r in results
+        )
+
+
+def _hawaii_results(route, origin="LHR"):
+    """Run HawaiiAlaskaRule on a dash-separated airport route."""
+    codes = route.split("-")
+    segs = [
+        Segment(**{"from": a, "to": b, "carrier": "AA"})
+        for a, b in zip(codes, codes[1:])
+    ]
+    itin = Itinerary(
+        ticket=Ticket(type="DONE4", cabin="business", origin=origin), segments=segs
+    )
+    return HawaiiAlaskaRule().check(itin, build_context(itin))
+
+
+class TestHawaiiSideTrip:
+    """Rule 3015 §5: no backtracking between Hawaii and other North America points."""
+
+    def test_mainland_hawaii_mainland_fails(self):
+        results = _hawaii_results("LAX-HNL-SFO", origin="LAX")
+        assert any(not r.passed and "side trip" in r.message for r in results)
+
+    def test_side_trip_with_interisland_hop_fails(self):
+        results = _hawaii_results("LAX-HNL-OGG-SFO", origin="LAX")
+        failures = [r for r in results if not r.passed]
+        assert len(failures) == 1
+        assert "side trip" in failures[0].message
+        assert failures[0].segments_involved == [0, 1, 2]
+
+    def test_full_rtw_with_hawaii_side_trip_fails(self):
+        results = _hawaii_results("LHR-JFK-LAX-HNL-SFO-NRT-HKG-LHR")
+        assert any(not r.passed and "side trip" in r.message for r in results)
+
+    def test_canada_or_alaska_side_trip_fails(self):
+        assert any(not r.passed for r in _hawaii_results("YVR-HNL-ANC", origin="YVR"))
+
+    def test_asia_to_hawaii_to_mainland_passes(self):
+        results = _hawaii_results("NRT-HNL-LAX", origin="NRT")
+        assert all(r.passed for r in results)
+
+    def test_mainland_to_hawaii_to_asia_passes(self):
+        results = _hawaii_results("LAX-HNL-NRT", origin="LAX")
+        assert all(r.passed for r in results)
+
+    def test_na_origin_home_via_hawaii_passes(self):
+        # Starts in North America, returns home via Hawaii: the first and last
+        # mainland stops are separated by other continents, not a side trip.
+        results = _hawaii_results("LAX-LHR-DOH-HKG-NRT-HNL-LAX", origin="LAX")
+        assert all(r.passed for r in results)
+
+    def test_interisland_within_transpacific_passes(self):
+        results = _hawaii_results("NRT-HNL-OGG-LAX", origin="NRT")
+        assert all(r.passed for r in results)
+
 
 class TestTranscontinentalUS:
     def test_v3_passes(self, v3_itinerary):

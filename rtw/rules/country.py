@@ -15,6 +15,39 @@ def _is_international(from_country: str, to_country: str) -> bool:
     return True
 
 
+def _has_us_transfer_without_stopover(segments) -> bool:
+    """True if an international arrival into the US connects, without a
+    stopover, to an international departure from the US. Rule 3015 §4(f).
+
+    A segment's ``type`` describes the stop at its destination, so the
+    arrival leg must be TRANSIT. Domestic US connections in between are
+    allowed if every intermediate US stop is also TRANSIT. Surface
+    segments are skipped when looking for the onward departure.
+    """
+    for i, seg in enumerate(segments):
+        if seg.is_surface:
+            continue
+        from_c = get_country(seg.from_airport)
+        to_c = get_country(seg.to_airport)
+        if not from_c or to_c != "US" or not _is_international(from_c, to_c):
+            continue
+        if seg.type != SegmentType.TRANSIT:
+            continue
+        for nxt in segments[i + 1:]:
+            if nxt.is_surface:
+                continue
+            n_from = get_country(nxt.from_airport)
+            n_to = get_country(nxt.to_airport)
+            if n_from != "US" or not n_to:
+                break
+            if _is_international(n_from, n_to):
+                return True
+            # Domestic connection: the next US stop must also be a transfer
+            if n_to != "US" or nxt.type != SegmentType.TRANSIT:
+                break
+    return False
+
+
 @register_rule
 class OriginCountryIntlLimitRule:
     """Origin country international departure/arrival limit. Rule 3015 §4(f)."""
@@ -45,7 +78,6 @@ class OriginCountryIntlLimitRule:
         intl_arrivals = 0
         intl_dep_segments = []
         intl_arr_segments = []
-        transit_departures = 0  # US exception: transit departures
 
         # Count international transfers from any single country
         country_transfers: dict[str, int] = {}
@@ -64,8 +96,6 @@ class OriginCountryIntlLimitRule:
             if from_country == origin_country and _is_international(from_country, to_country):
                 intl_departures += 1
                 intl_dep_segments.append(i)
-                if seg.type == SegmentType.TRANSIT:
-                    transit_departures += 1
 
             # Count intl arrivals into origin country
             if to_country == origin_country and _is_international(from_country, to_country):
@@ -76,10 +106,13 @@ class OriginCountryIntlLimitRule:
             if _is_international(from_country, to_country):
                 country_transfers[from_country] = country_transfers.get(from_country, 0) + 1
 
-        # Departure limit check
+        # US exception: 2 departures and 2 arrivals when one arrival-departure
+        # is a transfer without stopover in the US.
         dep_limit = 1
-        if origin_country == "US" and transit_departures >= 1:
-            dep_limit = 2  # US exception: 2 departures if one is transit
+        arr_limit = 1
+        if origin_country == "US" and _has_us_transfer_without_stopover(itinerary.segments):
+            dep_limit = 2
+            arr_limit = 2
 
         if intl_departures > dep_limit:
             results.append(
@@ -90,13 +123,13 @@ class OriginCountryIntlLimitRule:
                     passed=False,
                     severity=Severity.VIOLATION,
                     message=f"{intl_departures} international departures from {origin_name} — limit is {dep_limit}.",
-                    fix_suggestion=f"Reduce international departures from {origin_name}. US-origin allows 2 if one is a transit.",
+                    fix_suggestion=f"Reduce international departures from {origin_name}. US-origin allows 2 if one arrival-departure is a transfer without stopover.",
                     segments_involved=intl_dep_segments,
                 )
             )
 
-        # Arrival limit check (always 1)
-        if intl_arrivals > 1:
+        # Arrival limit check
+        if intl_arrivals > arr_limit:
             results.append(
                 RuleResult(
                     rule_id=self.rule_id,
@@ -104,8 +137,9 @@ class OriginCountryIntlLimitRule:
                     rule_reference=self.rule_reference,
                     passed=False,
                     severity=Severity.VIOLATION,
-                    message=f"{intl_arrivals} international arrivals into {origin_name} — limit is 1.",
-                    fix_suggestion=f"Reduce international arrivals into {origin_name} to 1.",
+                    message=f"{intl_arrivals} international arrivals into {origin_name} — limit is {arr_limit}.",
+                    fix_suggestion=f"Reduce international arrivals into {origin_name}. "
+                    f"US-origin allows 2 if one arrival-departure is a transfer without stopover.",
                     segments_involved=intl_arr_segments,
                 )
             )
@@ -128,7 +162,7 @@ class OriginCountryIntlLimitRule:
 
         if not results:
             dep_msg = f"{intl_departures}/{dep_limit} departures"
-            arr_msg = f"{intl_arrivals}/1 arrivals"
+            arr_msg = f"{intl_arrivals}/{arr_limit} arrivals"
             results.append(
                 RuleResult(
                     rule_id=self.rule_id,

@@ -2,7 +2,11 @@
 
 from rtw.rules.base import register_rule
 from rtw.models import RuleResult, Severity, Continent
-from rtw.continents import get_continent, get_country
+from rtw.continents import MIDDLE_EAST_COUNTRIES, get_continent, get_country
+
+# Rule 3015: Europe-Middle East consists of 2 zones, Europe and Middle East
+# (including Egypt, Libya and Sudan). Algeria, Morocco and Tunisia stay in Europe.
+MIDDLE_EAST_ZONE_COUNTRIES: frozenset[str] = MIDDLE_EAST_COUNTRIES | {"LY", "SD", "IR"}
 
 # Hemisphere classification per Rule 3015 Section 11 / Section 3.
 # Each Tariff Conference has one northern and one southern continent:
@@ -166,10 +170,13 @@ class HemisphereRevisitRule:
 
 @register_rule
 class EuMeAfricaZoneRule:
-    """EU/ME-Africa zone restriction: SA and Mauritius excluded when both IC flights are Africa↔EU/ME.
+    """Europe zone-Africa restriction: SA and Mauritius excluded when all Africa IC flights are Africa<->Europe zone.
 
-    Rule 3015 SS11: If both intercontinental flights are between Africa and the
-    Europe Zone, then South Africa and Mauritius cannot be included.
+    Rule 3015 SS4(e)3 / SS11: Europe-Middle East has two zones, Europe and
+    Middle East (incl. Egypt, Libya, Sudan). If travel to/from Africa is
+    to/from the Europe zone in both directions, South Africa and Mauritius
+    cannot be included. A Middle East zone or other-continent connection
+    disables the restriction.
     """
 
     rule_id = "eu_me_africa_zone"
@@ -180,9 +187,10 @@ class EuMeAfricaZoneRule:
     _EXCLUDED_COUNTRIES = frozenset({"ZA", "MU"})
 
     def check(self, itinerary, context) -> list[RuleResult]:
-        # Find all intercontinental segments touching Africa or EU_ME
+        # Find all intercontinental segments touching Africa and classify the
+        # non-Africa end as Europe zone or not.
         africa_ic_segments = []
-        non_africa_eu_me_ic = False
+        non_europe_zone_ic = False
 
         for i, seg in enumerate(itinerary.segments):
             from_cont = get_continent(seg.from_airport)
@@ -190,42 +198,49 @@ class EuMeAfricaZoneRule:
             if not from_cont or not to_cont or from_cont == to_cont:
                 continue
 
-            # This is an intercontinental segment
-            # Check if it involves Africa
             if Continent.AFRICA in (from_cont, to_cont):
-                other = to_cont if from_cont == Continent.AFRICA else from_cont
-                if other == Continent.EU_ME:
-                    africa_ic_segments.append(i)
+                if from_cont == Continent.AFRICA:
+                    other_cont, other_apt = to_cont, seg.to_airport
                 else:
-                    # Africa connects to something other than EU/ME
-                    non_africa_eu_me_ic = True
+                    other_cont, other_apt = from_cont, seg.from_airport
+                africa_ic_segments.append(i)
+                is_europe_zone = (
+                    other_cont == Continent.EU_ME
+                    and get_country(other_apt) not in MIDDLE_EAST_ZONE_COUNTRIES
+                )
+                if not is_europe_zone:
+                    # Africa connects to the Middle East zone or another continent
+                    non_europe_zone_ic = True
 
-        # Rule only applies if ALL intercontinental flights touching Africa go to/from EU_ME
-        if not africa_ic_segments or non_africa_eu_me_ic:
+        # Rule only applies if ALL intercontinental flights touching Africa go to/from the Europe zone
+        if not africa_ic_segments or non_europe_zone_ic:
             return [
                 RuleResult(
                     rule_id=self.rule_id,
                     rule_name=self.rule_name,
                     rule_reference=self.rule_reference,
                     passed=True,
-                    message="EU/ME-Africa zone restriction does not apply.",
+                    message="Europe zone-Africa restriction does not apply.",
                 )
             ]
 
         # Check for excluded countries (ZA, MU) in any segment
-        excluded_segments = []
+        excluded_airports: set[tuple[str, str]] = set()
+        excluded_seg_idx: set[int] = set()
         for i, seg in enumerate(itinerary.segments):
             for airport in (seg.from_airport, seg.to_airport):
                 country = get_country(airport)
                 if country in self._EXCLUDED_COUNTRIES:
-                    excluded_segments.append((i, airport, country))
+                    excluded_airports.add((airport, country))
+                    excluded_seg_idx.add(i)
 
-        if excluded_segments:
+        if excluded_airports:
             airports = ", ".join(
                 f"{apt} ({'South Africa' if cc == 'ZA' else 'Mauritius'})"
-                for _, apt, cc in excluded_segments
+                for apt, cc in sorted(excluded_airports)
             )
-            seg_nums = ", ".join(str(idx + 1) for idx, _, _ in excluded_segments)
+            seg_list = sorted(excluded_seg_idx)
+            seg_nums = ", ".join(str(idx + 1) for idx in seg_list)
             return [
                 RuleResult(
                     rule_id=self.rule_id,
@@ -234,12 +249,16 @@ class EuMeAfricaZoneRule:
                     passed=False,
                     severity=Severity.VIOLATION,
                     message=(
-                        f"Both intercontinental flights to/from Africa are via EU/ME zone. "
+                        f"All intercontinental flights to/from Africa are to/from the Europe zone. "
                         f"South Africa and Mauritius cannot be included. "
                         f"Affected airports: {airports} (segments {seg_nums})."
                     ),
-                    fix_suggestion="Route Africa via a non-EU/ME continent or remove South Africa/Mauritius stops.",
-                    segments_involved=[idx for idx, _, _ in excluded_segments],
+                    fix_suggestion=(
+                        "Route one Africa intercontinental flight via the Middle East zone "
+                        "(e.g. DOH, CAI) or another continent instead of the Europe zone, "
+                        "or remove South Africa/Mauritius stops."
+                    ),
+                    segments_involved=seg_list,
                 )
             ]
 
@@ -249,6 +268,6 @@ class EuMeAfricaZoneRule:
                 rule_name=self.rule_name,
                 rule_reference=self.rule_reference,
                 passed=True,
-                message="EU/ME-Africa zone: no excluded airports found.",
+                message="Europe zone-Africa restriction applies: no excluded airports found.",
             )
         ]

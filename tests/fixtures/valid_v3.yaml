@@ -29,20 +29,19 @@ segments:
     type: stopover
     notes: "QSuite 777 — TC2 to TC3 Pacific direction"
 
-  - from: HND
-    to: TSA
+  - from: NRT
+    to: TPE
     carrier: JL
-    flight: JL99
     date: "2026-03-22"
     type: stopover
-    notes: "Same-city: NRT/HND = Tokyo. JL Haneda to Songshan"
+    notes: "JL Narita to Taoyuan. Same airports in/out of Tokyo and Taipei: an airport change (NRT->HND, TSA->TPE) would be an extra surface segment (Rule 3015 §4)"
 
   - from: TPE
     to: HKG
     carrier: CX
     date: "2026-03-25"
     type: stopover
-    notes: "Same-city: TSA/TPE = Taipei. CX to Hong Kong"
+    notes: "CX to Hong Kong"
 
   - from: HKG
     to: SIN
@@ -112,8 +111,8 @@ segments:
     carrier: IB
     flight: IB6400
     date: "2026-05-04"
-    type: stopover
-    notes: "Iberia A350-900 — TC1 to TC2 Atlantic crossing"
+    type: transit
+    notes: "Iberia A350-900 — TC1 to TC2 Atlantic crossing. MAD is a transit (<24h): a stopover here would be a 3rd in EU_ME, over the Rule 3015 §6 origin-continent limit of 2"
 
   - from: MAD
     to: CAI

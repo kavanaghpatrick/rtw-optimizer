@@ -60,25 +60,41 @@ class FirstSegmentNotSurfaceRule:
 
 @register_rule
 class SameCityResolutionRule:
-    """Same-city airport pairs (NRT/HND, TSA/TPE) are NOT surface sectors."""
+    """Same-city airport changes (NRT->HND, TSA->TPE) are implicit surface sectors.
+
+    Rule 3015 §4: landing at one airport and departing from a different airport
+    by ground transport is a surface segment, and surface segments count toward
+    the 16-segment limit and per-continent limits. §7 "Avoiding Wasted
+    Segments": such surface segments waste a segment.
+    """
 
     rule_id = "same_city_resolution"
     rule_name = "Same-City Resolution"
-    rule_reference = "Rule 3015 §7"
+    rule_reference = "Rule 3015 §4/§7"
 
     def check(self, itinerary, context) -> list[RuleResult]:
         results = []
-        for i, (seg_idx, next_idx) in enumerate(context.same_city_pairs):
+        for seg_idx, next_idx in context.same_city_pairs:
             arr = itinerary.segments[seg_idx].to_airport
             dep = itinerary.segments[next_idx].from_airport
+            cont = get_continent(arr)
+            cont_name = cont.value if cont else "that continent"
             results.append(
                 RuleResult(
                     rule_id=self.rule_id,
                     rule_name=self.rule_name,
                     rule_reference=self.rule_reference,
-                    passed=True,
-                    severity=Severity.INFO,
-                    message=f"Same-city pair: {arr}/{dep} (not a surface sector).",
+                    passed=False,
+                    severity=Severity.WARNING,
+                    message=(
+                        f"Same-city airport change {arr}->{dep} is a surface sector: "
+                        f"it uses one of the 16 segments and counts toward the "
+                        f"{cont_name} segment limit."
+                    ),
+                    fix_suggestion=(
+                        f"Fly into and out of the same airport ({arr} or {dep}) "
+                        f"to save a segment."
+                    ),
                     segments_involved=[seg_idx, next_idx],
                 )
             )
@@ -89,7 +105,7 @@ class SameCityResolutionRule:
                     rule_name=self.rule_name,
                     rule_reference=self.rule_reference,
                     passed=True,
-                    message="No same-city pairs detected.",
+                    message="No same-city airport changes detected.",
                 )
             )
         return results

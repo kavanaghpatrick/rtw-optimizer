@@ -1,9 +1,11 @@
-"""Carrier eligibility rules. Rule 3015 §15, §19."""
+"""Carrier eligibility rules. Rule 3015 §4(j), §19."""
 
 from pathlib import Path
 import yaml
 
 from rtw.rules.base import register_rule
+from rtw.carriers import codeshare_permitted
+from rtw.continents import get_country
 from rtw.models import RuleResult, Severity
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
@@ -68,68 +70,83 @@ class QRNotFirstRule:
 
 @register_rule
 class EligibleCarrierRule:
-    """All carriers must be oneworld members."""
+    """Every flown segment must be marketed and operated per Rule 3015 §4(j)."""
 
     rule_id = "eligible_carriers"
     rule_name = "Eligible Carriers"
-    rule_reference = "Rule 3015 §15"
+    rule_reference = "Rule 3015 §4(j)"
+
+    def _result(self, passed, severity, message, fix="", idx=None):
+        return RuleResult(
+            rule_id=self.rule_id,
+            rule_name=self.rule_name,
+            rule_reference=self.rule_reference,
+            passed=passed,
+            severity=severity,
+            message=message,
+            fix_suggestion=fix,
+            segments_involved=[idx] if idx is not None else [],
+        )
 
     def check(self, itinerary, context) -> list[RuleResult]:
         results = []
-        invalid = []
         for i, seg in enumerate(itinerary.segments):
             if seg.is_surface or not seg.carrier:
                 continue
-            if seg.carrier not in _ELIGIBLE_CODES:
-                # Check for codeshare parent
-                parent = _CODESHARE_PARENTS.get(seg.carrier)
-                if parent and parent in _ELIGIBLE_CODES:
-                    carrier_info = _CARRIERS.get(seg.carrier, {})
-                    carrier_name = carrier_info.get("name", seg.carrier)
-                    parent_info = _CARRIERS.get(parent, {})
-                    parent_name = parent_info.get("name", parent)
-                    results.append(
-                        RuleResult(
-                            rule_id=self.rule_id,
-                            rule_name=self.rule_name,
-                            rule_reference=self.rule_reference,
-                            passed=True,
-                            severity=Severity.INFO,
-                            message=f"Segment {i + 1}: {seg.carrier} ({carrier_name}) recognized as {parent} ({parent_name}) codeshare.",
-                            fix_suggestion=f"For accuracy, use carrier: {parent} with operating_carrier: {seg.carrier}.",
-                            segments_involved=[i],
-                        )
-                    )
-                else:
-                    invalid.append((i, seg.carrier))
+            carrier = seg.carrier
+            info = _CARRIERS.get(carrier, {}) or {}
+            name = info.get("name", carrier)
 
-        if invalid:
-            for idx, carrier in invalid:
-                carrier_info = _CARRIERS.get(carrier, {})
-                note = carrier_info.get("notes", "")
-                results.append(
-                    RuleResult(
-                        rule_id=self.rule_id,
-                        rule_name=self.rule_name,
-                        rule_reference=self.rule_reference,
-                        passed=False,
-                        severity=Severity.VIOLATION,
-                        message=f"Segment {idx + 1}: {carrier} is not an eligible oneworld carrier. {note}",
-                        fix_suggestion=f"Replace {carrier} with a oneworld member airline.",
-                        segments_involved=[idx],
-                    )
-                )
+            # A codeshare-only code (JQ): its own flight numbers are not allowed.
+            parent = _CODESHARE_PARENTS.get(carrier)
+            if parent:
+                results.append(self._result(
+                    False, Severity.VIOLATION,
+                    f"Segment {i + 1}: {carrier} ({name}) flight numbers are not "
+                    f"permitted. Rule 3015 §4(j) only allows {parent}-marketed "
+                    f"flights operated by {carrier}.",
+                    f"Book the {parent} flight number: carrier: {parent} with "
+                    f"operating_carrier: {carrier}.",
+                    i,
+                ))
+                continue
+
+            if carrier not in _ELIGIBLE_CODES:
+                note = info.get("notes", "")
+                results.append(self._result(
+                    False, Severity.VIOLATION,
+                    f"Segment {i + 1}: {carrier} is not an eligible oneworld carrier. {note}".rstrip(),
+                    f"Replace {carrier} with a oneworld member airline.",
+                    i,
+                ))
+                continue
+
+            successor = info.get("successor")
+            if info.get("retired_code") and successor:
+                results.append(self._result(
+                    True, Severity.INFO,
+                    f"Segment {i + 1}: the {carrier} ({name}) code is retired; "
+                    f"these flights are now sold as {successor}.",
+                    f"Use carrier: {successor}.",
+                    i,
+                ))
+
+            operating = seg.operating_carrier
+            if operating and operating != carrier:
+                ok, reason = codeshare_permitted(carrier, operating)
+                if not ok:
+                    results.append(self._result(
+                        False, Severity.VIOLATION,
+                        f"Segment {i + 1}: {reason} (Rule 3015 §4(j)).",
+                        f"Book a flight operated by a oneworld Explorer carrier "
+                        f"instead of {operating}.",
+                        i,
+                    ))
 
         if not results:
-            results.append(
-                RuleResult(
-                    rule_id=self.rule_id,
-                    rule_name=self.rule_name,
-                    rule_reference=self.rule_reference,
-                    passed=True,
-                    message="All carriers are eligible oneworld members.",
-                )
-            )
+            results.append(self._result(
+                True, Severity.VIOLATION, "All carriers are eligible oneworld members."
+            ))
         return results
 
 
@@ -188,3 +205,86 @@ class QFJQCodeshareRule:
                 message=f"JQ segments found ({len(jq_segments)}). Plating carrier {'is ' + plating if plating else 'not specified'} — OK.",
             )
         ]
+
+
+def _is_qf_operated(seg) -> bool:
+    return (seg.operating_carrier or seg.carrier) == "QF"
+
+
+def _is_qf_own_flight(seg) -> bool:
+    """QF-marketed and QF-operated."""
+    return seg.carrier == "QF" and _is_qf_operated(seg)
+
+
+@register_rule
+class QFWithinUSARule:
+    """QF-operated flights within the USA only as part of a QF journey via LAX."""
+
+    rule_id = "qf_within_usa"
+    rule_name = "QF Within USA"
+    rule_reference = "Rule 3015 carrier restrictions (QF within USA)"
+
+    def check(self, itinerary, context) -> list[RuleResult]:
+        segs = itinerary.segments
+        results = []
+        for i, seg in enumerate(segs):
+            if seg.is_surface or not seg.carrier or not _is_qf_operated(seg):
+                continue
+            if get_country(seg.from_airport) != "US" or get_country(seg.to_airport) != "US":
+                continue
+
+            prev_seg = segs[i - 1] if i > 0 else None
+            next_seg = segs[i + 1] if i + 1 < len(segs) else None
+            via_lax = (
+                seg.to_airport == "LAX"
+                and next_seg is not None
+                and not next_seg.is_surface
+                and next_seg.from_airport == "LAX"
+                and _is_qf_own_flight(next_seg)
+            ) or (
+                seg.from_airport == "LAX"
+                and prev_seg is not None
+                and not prev_seg.is_surface
+                and prev_seg.to_airport == "LAX"
+                and _is_qf_own_flight(prev_seg)
+            )
+            route = f"{seg.from_airport}-{seg.to_airport}"
+            if via_lax:
+                results.append(RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=False,
+                    severity=Severity.WARNING,
+                    message=f"Segment {i + 1}: QF-operated {route} is within the USA. "
+                    "Qantas flights within the USA are restricted on oneworld Explorer; "
+                    "this one connects with a Qantas flight at LAX, which is the "
+                    "permitted pattern, but confirm with the ticketing agent.",
+                    fix_suggestion="Confirm the QF domestic US sector prices on the RTW fare.",
+                    segments_involved=[i],
+                ))
+            else:
+                results.append(RuleResult(
+                    rule_id=self.rule_id,
+                    rule_name=self.rule_name,
+                    rule_reference=self.rule_reference,
+                    passed=False,
+                    severity=Severity.VIOLATION,
+                    message=f"Segment {i + 1}: QF-operated {route} is within the USA "
+                    "with no connecting or stopover Qantas (QF-marketed, QF-operated) "
+                    "flight at LAX. Qantas flights within the USA are not permitted "
+                    "on their own.",
+                    fix_suggestion="Fly this US sector on AA or AS, or connect it to a "
+                    "Qantas flight at LAX.",
+                    segments_involved=[i],
+                ))
+
+        if not results:
+            results.append(RuleResult(
+                rule_id=self.rule_id,
+                rule_name=self.rule_name,
+                rule_reference=self.rule_reference,
+                passed=True,
+                message="No Qantas-operated flights within the USA.",
+            ))
+        return results

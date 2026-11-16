@@ -263,7 +263,9 @@ class CarrierInfo(BaseModel):
     ntp_rates: Optional[dict[str, float]] = None
     yq_tier: Optional[str] = None
     yq_estimate_per_segment: Optional[float] = None
-    rtw_booking_class: Optional[str] = None
+    rtw_booking_classes: Optional[dict[str, str]] = None
+    rtw_booking_classes_domestic: Optional[dict[str, str]] = None
+    rtw_fallback_class: Optional[str] = None
     notes: str = ""
 
 
@@ -345,6 +347,8 @@ class CostEstimate(BaseModel):
     total_all_pax_usd: float = 0.0
     passengers: int = 1
     plating_carrier: str = ""
+    fare_carrier: str = ""  # carrier(s) filing the base fare used
+    fare_source: str = ""  # where the base fare came from, incl. data date
     notes: str = ""
 
 

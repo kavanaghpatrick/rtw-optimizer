@@ -37,23 +37,53 @@ class TestMinimumStopovers:
 
 
 class TestOriginContinentStopovers:
-    def test_v3_warns_about_mad(self, v3_itinerary):
-        """V3 has AMM, DOH, MAD as EU/ME stopovers — should warn."""
+    def test_v3_at_origin_continent_limit(self, v3_itinerary):
+        """V3 has AMM, DOH as EU/ME stopovers (MAD is a transit) — 2/2 passes."""
         itin = Itinerary(**v3_itinerary)
         ctx = build_context(itin)
         results = OriginContinentStopoverRule().check(itin, ctx)
-        # Should produce a warning (3 stopovers in EU/ME)
-        warnings = [r for r in results if r.severity == Severity.WARNING]
-        assert len(warnings) >= 1  # 3 stopovers in EU/ME should produce a warning
+        assert all(r.passed for r in results)
+        assert any("2/2" in r.message for r in results)
+
+    def test_v3_with_mad_stopover_violates(self, v3_itinerary):
+        """Making MAD a stopover gives 3 EU/ME stopovers — Rule 3015 §6 hard limit."""
+        itin = Itinerary(**v3_itinerary)
+        mad_idx = next(i for i, s in enumerate(itin.segments) if s.to_airport == "MAD")
+        itin.segments[mad_idx].type = "stopover"
+        ctx = build_context(itin)
+        results = OriginContinentStopoverRule().check(itin, ctx)
+        violations = [r for r in results if not r.passed and r.severity == Severity.VIOLATION]
+        assert len(violations) == 1
+        assert "3 stopovers in origin continent EU_ME (limit: 2)" in violations[0].message
+        assert mad_idx in violations[0].segments_involved
+        assert len(violations[0].segments_involved) == 3
 
 
 class TestSameCityResolution:
-    def test_v3_detects_same_city_pairs(self, v3_itinerary):
+    def test_detects_same_city_airport_changes(self, v3_same_city_itinerary):
+        itin = Itinerary(**v3_same_city_itinerary)
+        ctx = build_context(itin)
+        results = SameCityResolutionRule().check(itin, ctx)
+        flagged = [r for r in results if "airport change" in r.message]
+        assert len(flagged) == 2  # NRT->HND and TSA->TPE
+        for r in flagged:
+            # §4: the airport change is a surface sector using one of the 16
+            assert not r.passed
+            assert r.severity == Severity.WARNING
+            assert "surface sector" in r.message
+            assert "16 segments" in r.message
+            assert "Asia" in r.message
+            # §7 "Avoiding Wasted Segments"
+            assert "same airport" in r.fix_suggestion
+        msgs = " ".join(r.message for r in flagged)
+        assert "NRT->HND" in msgs and "TSA->TPE" in msgs
+
+    def test_v3_has_no_airport_changes(self, v3_itinerary):
         itin = Itinerary(**v3_itinerary)
         ctx = build_context(itin)
         results = SameCityResolutionRule().check(itin, ctx)
-        info_results = [r for r in results if "Same-city pair" in r.message]
-        assert len(info_results) >= 2  # NRT/HND and TSA/TPE
+        assert len(results) == 1
+        assert results[0].passed
 
 
 class TestMinimumStopoverBoundary:
@@ -141,7 +171,7 @@ class TestOriginContinentStopoverExpanded:
         assert all(r.passed for r in results)
         assert any("2/2" in r.message for r in results)
 
-    def test_three_stopovers_in_origin_warns(self):
+    def test_three_stopovers_in_origin_violates(self):
         segs = [
             {"from": "CAI", "to": "AMM", "carrier": "RJ", "type": "stopover"},
             {"from": "AMM", "to": "DOH", "carrier": "QR", "type": "stopover"},
@@ -154,9 +184,11 @@ class TestOriginContinentStopoverExpanded:
         itin = _make_itinerary(segs)
         ctx = build_context(itin)
         results = OriginContinentStopoverRule().check(itin, ctx)
-        warnings = [r for r in results if r.severity == Severity.WARNING]
-        assert len(warnings) >= 1
-        assert any("3 stopovers" in r.message for r in results)
+        violations = [r for r in results if not r.passed and r.severity == Severity.VIOLATION]
+        assert len(violations) == 1
+        assert "3 stopovers in origin continent EU_ME (limit: 2)" in violations[0].message
+        assert violations[0].segments_involved == [0, 1, 2]
+        assert "transits" in violations[0].fix_suggestion
 
     def test_unknown_origin_passes_with_info(self):
         segs = [

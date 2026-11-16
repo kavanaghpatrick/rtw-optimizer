@@ -1,0 +1,42 @@
+# Regression fixture: Caribbean stopover on a DONE3 from London.
+# Antigua (ANU) used to have no continent mapping, so LHR-ANU was treated as a
+# domestic Europe flight: "No Atlantic ocean crossing" and ANU counted as a
+# Europe/Middle East stopover. 01-fare-rules.md §3: North America includes the
+# Caribbean. The identical trip via JFK instead of ANU always passed.
+#
+# Route: LHR -> ANU -> MIA -> LAX -> HKG -> LHR (westbound)
+# Continents: EU_ME, N_America, Asia (3)
+
+ticket:
+  type: DONE3
+  cabin: business
+  origin: LHR
+  passengers: 1
+  departure: "2026-04-01"
+
+segments:
+  - from: LHR
+    to: ANU
+    carrier: BA
+    date: "2026-04-01"
+    type: stopover
+  - from: ANU
+    to: MIA
+    carrier: AA
+    date: "2026-04-08"
+    type: transit
+  - from: MIA
+    to: LAX
+    carrier: AA
+    date: "2026-04-08"
+    type: stopover
+  - from: LAX
+    to: HKG
+    carrier: CX
+    date: "2026-04-12"
+    type: stopover
+  - from: HKG
+    to: LHR
+    carrier: CX
+    date: "2026-04-18"
+    type: final

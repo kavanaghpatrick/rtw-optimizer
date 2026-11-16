@@ -256,6 +256,26 @@ class TestRuleFixtures:
         # Should have arrival limit violation
         assert any("arrival" in v.message.lower() for v in intl_violations)
 
+    def test_rule_4f_us_transfer_pass(self, validator):
+        """JFK-LHR-DOH-HKG-LAX(transit)-MEX-JFK: LAX is a US transfer without
+        stopover, so 2 intl departures and 2 intl arrivals are permitted.
+        """
+        report = validator.validate(_load("rule_4f_us_transfer_pass.yaml"))
+
+        assert _violations_by_rule(report, "origin_country_intl_limit") == []
+        intl = _results_by_rule(report, "origin_country_intl_limit")
+        assert any("2/2 departures" in r.message and "2/2 arrivals" in r.message for r in intl)
+
+    def test_rule_4f_us_transfer_fail(self, validator):
+        """Same route with LAX as a stopover: the US exception does not
+        apply, so both limits stay at 1 -> VIOLATION.
+        """
+        report = validator.validate(_load("rule_4f_us_transfer_fail.yaml"))
+
+        intl_violations = _violations_by_rule(report, "origin_country_intl_limit")
+        assert any("departure" in v.message.lower() for v in intl_violations)
+        assert any("arrival" in v.message.lower() for v in intl_violations)
+
     def test_rule_4i_surface_ban(self, validator):
         """LAX->LHR surface = TC1->TC2 = transoceanic surface.
         Non-SWP origin (CAI) -> no exemption -> VIOLATION.

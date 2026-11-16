@@ -40,18 +40,84 @@ class TestOriginCountryIntlLimit:
         assert "departure" in violations[0].message.lower()
 
     def test_us_two_dep_one_transit_passes(self):
-        """US origin: 2 intl departures but 1 is transit = PASS."""
+        """US origin: 2 intl deps + 2 intl arrivals, JFK is a transfer
+        (arrival leg LHR-JFK is TRANSIT) = PASS on both limits."""
         segs = [
-            {"from": "JFK", "to": "LHR", "carrier": "BA", "type": "transit"},  # transit dep
-            {"from": "LHR", "to": "JFK", "carrier": "BA"},
+            {"from": "JFK", "to": "LHR", "carrier": "BA"},
+            {"from": "LHR", "to": "JFK", "carrier": "BA", "type": "transit"},  # US transfer
             {"from": "JFK", "to": "NRT", "carrier": "JL"},  # 2nd intl dep
             {"from": "NRT", "to": "JFK", "carrier": "JL"},
         ]
         itin = _make_itinerary(segs, origin="JFK")
         ctx = build_context(itin)
         results = OriginCountryIntlLimitRule().check(itin, ctx)
-        dep_violations = [r for r in results if r.severity == Severity.VIOLATION and "departure" in r.message.lower()]
-        assert len(dep_violations) == 0
+        assert all(r.passed for r in results)
+
+    def test_us_transit_at_foreign_destination_does_not_qualify(self):
+        """A TRANSIT type on a departure leg describes the stop abroad (LHR),
+        not a US transfer, so the exception does not apply."""
+        segs = [
+            {"from": "JFK", "to": "LHR", "carrier": "BA", "type": "transit"},
+            {"from": "LHR", "to": "JFK", "carrier": "BA", "type": "stopover"},  # US stopover
+            {"from": "JFK", "to": "NRT", "carrier": "JL"},
+            {"from": "NRT", "to": "JFK", "carrier": "JL"},
+        ]
+        itin = _make_itinerary(segs, origin="JFK")
+        ctx = build_context(itin)
+        results = OriginCountryIntlLimitRule().check(itin, ctx)
+        violations = [r for r in results if r.severity == Severity.VIOLATION]
+        assert any("departure" in r.message.lower() for r in violations)
+        assert any("arrival" in r.message.lower() for r in violations)
+
+    def test_us_transfer_via_domestic_connection_passes(self):
+        """HKG-LAX(transit)-DFW(transit)-MEX: domestic connection inside the
+        transfer chain still counts as a transfer without stopover."""
+        segs = [
+            {"from": "JFK", "to": "LHR", "carrier": "BA"},
+            {"from": "LHR", "to": "HKG", "carrier": "CX"},
+            {"from": "HKG", "to": "LAX", "carrier": "CX", "type": "transit"},
+            {"from": "LAX", "to": "DFW", "carrier": "AA", "type": "transit"},
+            {"from": "DFW", "to": "MEX", "carrier": "AA"},
+            {"from": "MEX", "to": "JFK", "carrier": "AA", "type": "final"},
+        ]
+        itin = _make_itinerary(segs, origin="JFK", ticket_type="DONE3")
+        ctx = build_context(itin)
+        results = OriginCountryIntlLimitRule().check(itin, ctx)
+        assert all(r.passed for r in results)
+        assert "2/2 departures" in results[0].message
+        assert "2/2 arrivals" in results[0].message
+
+    def test_us_domestic_stopover_in_chain_violation(self):
+        """HKG-LAX(transit)-DFW(stopover)-MEX: stopover in the US breaks the
+        transfer, so limits stay at 1."""
+        segs = [
+            {"from": "JFK", "to": "LHR", "carrier": "BA"},
+            {"from": "LHR", "to": "HKG", "carrier": "CX"},
+            {"from": "HKG", "to": "LAX", "carrier": "CX", "type": "transit"},
+            {"from": "LAX", "to": "DFW", "carrier": "AA", "type": "stopover"},
+            {"from": "DFW", "to": "MEX", "carrier": "AA"},
+            {"from": "MEX", "to": "JFK", "carrier": "AA", "type": "final"},
+        ]
+        itin = _make_itinerary(segs, origin="JFK", ticket_type="DONE3")
+        ctx = build_context(itin)
+        results = OriginCountryIntlLimitRule().check(itin, ctx)
+        violations = [r for r in results if r.severity == Severity.VIOLATION]
+        assert any("limit is 1" in r.message for r in violations)
+
+    def test_non_us_origin_no_transfer_exception(self):
+        """The transfer exception is US-only: LHR origin with a UK transfer
+        still has a limit of 1 arrival."""
+        segs = [
+            {"from": "LHR", "to": "JFK", "carrier": "BA"},
+            {"from": "JFK", "to": "LHR", "carrier": "BA", "type": "transit"},
+            {"from": "LHR", "to": "NRT", "carrier": "JL"},
+            {"from": "NRT", "to": "LHR", "carrier": "JL"},
+        ]
+        itin = _make_itinerary(segs, origin="LHR")
+        ctx = build_context(itin)
+        results = OriginCountryIntlLimitRule().check(itin, ctx)
+        violations = [r for r in results if r.severity == Severity.VIOLATION]
+        assert any("arrival" in r.message.lower() for r in violations)
 
     def test_us_ca_not_international(self):
         """US<->CA movements are NOT international."""

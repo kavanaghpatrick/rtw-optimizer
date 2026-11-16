@@ -112,20 +112,42 @@ class TestV3Integration:
 
         assert report.passed is True
 
-    def test_v3_has_warnings_only(self, v3_itinerary):
-        """V3 may have warnings (e.g., origin continent stopovers) but no violations."""
+    def test_v3_has_no_violations(self, v3_itinerary):
+        """V3 has no violations; origin continent stopovers are at the 2/2 limit."""
         itin = _build_itinerary(v3_itinerary)
         validator = Validator()
         report = validator.validate(itin)
 
         assert report.violation_count == 0
-        # V3 should produce at least 1 warning (origin continent stopovers)
-        assert report.warning_count >= 1
+        origin = [r for r in report.results if r.rule_id == "origin_continent_stopovers"]
+        assert origin and all(r.passed for r in origin)
 
     def test_v3_segment_count(self, v3_itinerary):
-        """V3 has 16 segments — at the maximum allowed."""
+        """V3 has 16 segments and no airport changes — exactly at the maximum."""
         itin = _build_itinerary(v3_itinerary)
         assert len(itin.segments) == 16
+        ctx = build_context(itin)
+        assert ctx.implicit_surface_count == 0
+        report = Validator().validate(itin)
+        seg = [r for r in report.results if r.rule_id == "segment_count"]
+        assert seg and all(r.passed for r in seg)
+        assert seg[0].message == "16 segments (limit: 16)."
+
+    def test_v3_same_city_gaps_count_as_18(self, v3_same_city_itinerary):
+        """16 listed + NRT->HND + TSA->TPE airport changes = 18 segments (§4)."""
+        itin = _build_itinerary(v3_same_city_itinerary)
+        report = Validator().validate(itin)
+        seg = [r for r in report.results if r.rule_id == "segment_count"]
+        assert len(seg) == 1
+        assert not seg[0].passed
+        assert seg[0].severity == Severity.VIOLATION
+        assert "16 listed + 2 implicit airport-change surface sectors = 18" in seg[0].message
+        asia = [
+            r for r in report.results
+            if r.rule_id == "per_continent_limit" and r.message.startswith("Asia")
+        ]
+        assert len(asia) == 1 and not asia[0].passed
+        assert "Asia: 5 segments" in asia[0].message
 
     def test_v3_context_build(self, v3_itinerary):
         """build_context produces correct data for V3."""
@@ -141,8 +163,8 @@ class TestV3Integration:
         # Should visit 4 continents for DONE4
         assert len(ctx.continents_visited) == 4
 
-        # Should have same-city pairs (NRT/HND, TSA/TPE)
-        assert len(ctx.same_city_pairs) == 2
+        # Flies NRT in/out and TPE in/out: no same-city airport changes
+        assert len(ctx.same_city_pairs) == 0
 
     def test_v3_all_rule_ids_present(self, v3_itinerary):
         """Every registered rule should produce at least one result."""
