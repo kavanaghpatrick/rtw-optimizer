@@ -94,6 +94,58 @@ class DClassResult(BaseModel):
         return max(f.seats for f in ns) if ns else 0
 
     @property
+    def connection_options(self) -> list[list[FlightAvailability]]:
+        """Ways to fly the requested O&D without a nonstop, as lists of legs.
+
+        ExpertFlyer lists each leg of a connection as its own row, in order.
+        Consecutive rows are chained into one itinerary when a row departs
+        from the airport the previous row arrived at (and that airport is not
+        the requested destination). A chain only counts if it starts at the
+        requested origin and ends at the requested destination, so a leg
+        between two unrelated cities is never counted. A single O&D row with
+        stops > 0 (a direct, same-flight-number service) also counts.
+        """
+        chains: list[list[FlightAvailability]] = []
+        current: list[FlightAvailability] = []
+        for f in self.flights:
+            if (
+                current
+                and current[-1].destination == f.origin
+                and current[-1].destination != self.destination
+            ):
+                current.append(f)
+            else:
+                if current:
+                    chains.append(current)
+                current = [f]
+        if current:
+            chains.append(current)
+
+        options = []
+        for chain in chains:
+            if chain[0].origin != self.origin or chain[-1].destination != self.destination:
+                continue
+            if len(chain) > 1 or chain[0].stops > 0:
+                options.append(chain)
+        return options
+
+    @property
+    def available_connections(self) -> list[list[FlightAvailability]]:
+        """Connection options where every leg has seats."""
+        return [
+            legs for legs in self.connection_options
+            if min(f.seats for f in legs) > 0
+        ]
+
+    @property
+    def connection_seats(self) -> int:
+        """Best seat count on a connection (the lowest leg limits each one)."""
+        return max(
+            (min(f.seats for f in legs) for legs in self.available_connections),
+            default=0,
+        )
+
+    @property
     def flight_count(self) -> int:
         return len(self.flights)
 
@@ -114,7 +166,10 @@ class DClassResult(BaseModel):
             if ns:
                 return f"{bc}{self.nonstop_seats} ({len(ns)} ns)"
             # Has flights but none are nonstop — flag with *
-            return f"{bc}{self.seats}* ({self.available_count} conn)"
+            return (
+                f"{bc}{self.connection_seats}* "
+                f"({len(self.available_connections)} conn)"
+            )
         return f"{bc}{self.seats}"
 
     @property
@@ -137,8 +192,8 @@ class SegmentVerification(BaseModel):
     flight_number: Optional[str] = None
     target_date: Optional[datetime.date] = None
     dclass: Optional[DClassResult] = None
-    # Fallback-class result, populated only when the primary (D) check returned
-    # NOT_AVAILABLE and the carrier has a fallback class (H on AA, B otherwise).
+    # Fallback-class result, populated only when the primary (D) check found no
+    # nonstop seats and the carrier has a fallback class (H on AA, B otherwise).
     fallback: Optional[DClassResult] = None
     married_segment_note: Optional[str] = None
 
@@ -172,11 +227,7 @@ class VerifyResult(BaseModel):
     @property
     def confirmed_any(self) -> int:
         """Count of flown segments with any D-class available (including connections)."""
-        return sum(
-            1
-            for s in self.flown_segments
-            if s.dclass and s.dclass.status == DClassStatus.AVAILABLE
-        )
+        return self.confirmed + len(self.connection_only_segments)
 
     @property
     def total_flown(self) -> int:
@@ -200,8 +251,9 @@ class VerifyResult(BaseModel):
         return [
             s for s in self.flown_segments
             if s.dclass
-            and s.dclass.status == DClassStatus.AVAILABLE
+            and s.dclass.status not in (DClassStatus.ERROR, DClassStatus.UNKNOWN)
             and not s.dclass.has_nonstop
+            and s.dclass.connection_seats > 0
         ]
 
     @property
@@ -214,9 +266,9 @@ class VerifyResult(BaseModel):
         return [
             s for s in self.flown_segments
             if s.dclass
-            and s.dclass.status == DClassStatus.NOT_AVAILABLE
+            and not s.dclass.has_nonstop
             and s.fallback
-            and s.fallback.status == DClassStatus.AVAILABLE
+            and s.fallback.has_nonstop
         ]
 
     @property

@@ -160,3 +160,68 @@ class TestScanDatesExecution:
         call_args = mock_scraper.check_availability.call_args
         assert call_args[0][0] == "DOH"
         assert call_args[0][1] == "LAX"
+
+
+def _result_for(date, status, nonstop_seats=0):
+    """A scrape result for DOH-LAX on one date."""
+    from rtw.verify.models import DClassResult, FlightAvailability
+
+    flights = []
+    if status.value in ("available", "not_available"):
+        flights = [FlightAvailability(
+            carrier="QR", flight_number="QR739", origin="DOH",
+            destination="LAX", seats=nonstop_seats, stops=0,
+        )]
+    return DClassResult(
+        status=status, seats=nonstop_seats, carrier="QR", origin="DOH",
+        destination="LAX", target_date=date, booking_class="D",
+        flights=flights,
+        error_message="Results table not found" if not flights else None,
+    )
+
+
+class TestScanDatesErrors:
+    @patch("rtw.scraper.expertflyer.ExpertFlyerScraper")
+    def test_errored_dates_shown_as_err_not_d0(self, mock_scraper_cls):
+        """A failed scrape (retries exhausted) is ERR, and left out of the count."""
+        from rtw.verify.models import DClassStatus
+
+        mock_scraper = MagicMock()
+        mock_scraper_cls.return_value = mock_scraper
+        mock_scraper.check_availability.side_effect = lambda o, d, date, **kw: {
+            15: _result_for(date, DClassStatus.ERROR),
+            16: _result_for(date, DClassStatus.NOT_AVAILABLE, 0),
+            17: _result_for(date, DClassStatus.UNKNOWN),
+        }[date.day]
+
+        result = runner.invoke(app, [
+            "scan-dates", "DOH", "LAX", "QR",
+            "--from", "2026-04-15", "--to", "2026-04-17",
+        ])
+        assert result.exit_code == 0
+        err_rows = [line for line in result.output.splitlines() if "ERR" in line]
+        assert len(err_rows) == 2
+        assert any("2026-04-15" in line for line in err_rows)
+        assert any("2026-04-17" in line for line in err_rows)
+        assert "0/1 checked dates have nonstop D-class (2 errored)." in result.output
+
+    @patch("rtw.scraper.expertflyer.ExpertFlyerScraper")
+    def test_errors_do_not_dilute_hit_count(self, mock_scraper_cls):
+        from rtw.verify.models import DClassStatus
+
+        mock_scraper = MagicMock()
+        mock_scraper_cls.return_value = mock_scraper
+        mock_scraper.check_availability.side_effect = lambda o, d, date, **kw: (
+            _result_for(date, DClassStatus.AVAILABLE, 4)
+            if date.day == 15 else _result_for(date, DClassStatus.ERROR)
+        )
+
+        result = runner.invoke(app, [
+            "scan-dates", "DOH", "LAX", "QR",
+            "--from", "2026-04-15", "--to", "2026-04-16",
+            "--nonstop-only",
+        ])
+        assert result.exit_code == 0
+        assert "ERR" in result.output  # still shown under --nonstop-only
+        assert "1/1 checked dates have nonstop D-class (1 errored)" in result.output
+        assert "Best: 2026-04-15 D4" in result.output

@@ -161,7 +161,13 @@ def check_itinerary_availability(
             results.append(None)
             continue
 
-        seg_bc = booking_class if booking_class is not None else get_booking_class(seg.carrier, cabin)
+        seg_bc = (
+            booking_class
+            if booking_class is not None
+            else get_booking_class(
+                seg.carrier, cabin, seg.from_airport, seg.to_airport
+            )
+        )
 
         try:
             avail = scraper.check_availability(

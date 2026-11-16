@@ -1,5 +1,12 @@
 # oneworld alliance carrier reference data
 # YQ tiers: very_low < low < medium < high < very_high
+#
+# rtw_booking_classes: Rule 3015 §5(b) booking codes (27 FEB 2026 filing) by fare
+#   cabin -- first (AONE*), business (DONE*), ione3 (IONE3), economy (LONE*).
+# rtw_booking_classes_domestic: override used when both airports are in the
+#   same country (AY domestic, JL/NU domestic). Absent = same as international.
+# rtw_fallback_class: business (DONE*) class when the primary is sold out
+#   (B, or H on AA). First fares fall back to Y for every carrier (rtw/carriers.py).
 
 AA:
   name: American Airlines
@@ -8,7 +15,7 @@ AA:
   ntp_method: revenue
   yq_tier: low
   yq_estimate_per_segment: 50
-  rtw_booking_class: D
+  rtw_booking_classes: {first: A, business: D, ione3: I, economy: L}
   rtw_fallback_class: H   # AA falls back to H (NOT B) when D sold out — Rule 3015
   notes: "Revenue-based NTP. Business books D (primary); H only as fallback when D is sold out."
 
@@ -19,7 +26,7 @@ BA:
   ntp_method: revenue
   yq_tier: very_high
   yq_estimate_per_segment: 321
-  rtw_booking_class: D
+  rtw_booking_classes: {first: A, business: D, ione3: I, economy: L}
   rtw_fallback_class: B
   notes: "Highest surcharges. Revenue-based NTP + 400 bonus per Club World segment."
 
@@ -30,7 +37,7 @@ CX:
   ntp_method: distance
   yq_tier: medium
   yq_estimate_per_segment: 200
-  rtw_booking_class: D
+  rtw_booking_classes: {first: A, business: D, ione3: I, economy: L}
   rtw_fallback_class: B
   notes: "D class = 25% of distance for NTP."
 
@@ -41,7 +48,7 @@ FJ:
   ntp_method: distance
   yq_tier: very_low
   yq_estimate_per_segment: 20
-  rtw_booking_class: D
+  rtw_booking_classes: {first: D, business: D, ione3: I, economy: L}
   rtw_fallback_class: B
   notes: "Joined oneworld April 2025. ATR-72 routes are single class."
 
@@ -52,8 +59,10 @@ HA:
   ntp_method: distance
   yq_tier: low
   yq_estimate_per_segment: 30
-  rtw_booking_class: D
+  rtw_booking_classes: {first: D, business: D, ione3: I, economy: L}   # Not in the 27 FEB 2026 filing; HA flights now AS-marketed, so mirrors AS
   rtw_fallback_class: B
+  retired_code: true   # HA designator retired; Hawaiian flights are sold as AS
+  successor: AS
   notes: "Joined oneworld 2026-04-22 as 16th full member. HA IATA code retired same day; Hawaiian-operated flights now marketed under AS on single Alaska Air Group operating certificate. Booking class and YQ provisional until partner inventory stabilizes."
 
 QR:
@@ -63,7 +72,7 @@ QR:
   ntp_method: distance
   yq_tier: medium
   yq_estimate_per_segment: 150
-  rtw_booking_class: D
+  rtw_booking_classes: {first: A, business: D, ione3: I, economy: L}
   rtw_fallback_class: B   # B fallback; intra-Middle-East no-business services may book A
   notes: "Cannot be first carrier. D class = 50% of distance for NTP. Non-linear YQ structure."
 
@@ -74,7 +83,7 @@ RJ:
   ntp_method: distance
   yq_tier: medium
   yq_estimate_per_segment: 170
-  rtw_booking_class: D
+  rtw_booking_classes: {first: D, business: D, ione3: I, economy: L}
   rtw_fallback_class: B
   notes: "D class = 25% of distance for NTP."
 
@@ -85,7 +94,7 @@ JL:
   ntp_method: distance
   yq_tier: very_low
   yq_estimate_per_segment: 12
-  rtw_booking_class: D
+  rtw_booking_classes: {first: A, business: D, ione3: I, economy: L}
   rtw_fallback_class: B
   notes: "Lowest surcharges. D class = 50% of distance for NTP."
 
@@ -96,7 +105,7 @@ IB:
   ntp_method: revenue
   yq_tier: high
   yq_estimate_per_segment: 220
-  rtw_booking_class: D
+  rtw_booking_classes: {first: D, business: D, ione3: I, economy: L}
   rtw_fallback_class: B
   notes: "Revenue-based NTP. Includes Iberia Express (I2) flights."
 
@@ -107,7 +116,8 @@ AY:
   ntp_method: distance
   yq_tier: very_low
   yq_estimate_per_segment: 10
-  rtw_booking_class: D
+  rtw_booking_classes: {first: D, business: D, ione3: I, economy: L}   # AY international; domestic overrides below
+  rtw_booking_classes_domestic: {first: Y, business: Y, ione3: Y, economy: L}   # AY domestic flights
   rtw_fallback_class: B
   notes: "D class = 50% of distance for NTP. Very low surcharges."
 
@@ -118,7 +128,7 @@ QF:
   ntp_method: distance
   yq_tier: very_high
   yq_estimate_per_segment: 334
-  rtw_booking_class: D
+  rtw_booking_classes: {first: A, business: D, ione3: I, economy: L}
   rtw_fallback_class: B
   notes: "D class = 25% of distance for NTP. Notoriously stingy with D-class availability."
 
@@ -129,7 +139,7 @@ MH:
   ntp_method: distance
   yq_tier: low
   yq_estimate_per_segment: 60
-  rtw_booking_class: D
+  rtw_booking_classes: {first: A, business: D, ione3: I, economy: L}
   rtw_fallback_class: B
   notes: "D class = 25% of distance for NTP."
 
@@ -140,7 +150,7 @@ AS:
   ntp_method: distance
   yq_tier: low
   yq_estimate_per_segment: 40
-  rtw_booking_class: D
+  rtw_booking_classes: {first: D, business: D, ione3: I, economy: L}
   rtw_fallback_class: B
   notes: "Affiliate/partner. D class = 25% of distance for NTP. Erratic availability."
 
@@ -151,7 +161,7 @@ AT:
   ntp_method: distance
   yq_tier: medium
   yq_estimate_per_segment: 100
-  rtw_booking_class: D
+  rtw_booking_classes: {first: D, business: D, ione3: I, economy: L}
   rtw_fallback_class: B
   notes: "D class = 25% of distance for NTP."
 
@@ -162,7 +172,7 @@ UL:
   ntp_method: distance
   yq_tier: low
   yq_estimate_per_segment: 50
-  rtw_booking_class: D
+  rtw_booking_classes: {first: D, business: D, ione3: I, economy: L}
   rtw_fallback_class: B
   notes: "D class = 25% of distance for NTP."
 
@@ -173,9 +183,21 @@ WY:
   ntp_method: distance
   yq_tier: low
   yq_estimate_per_segment: 90
-  rtw_booking_class: D
+  rtw_booking_classes: {first: A, business: D, ione3: I, economy: L}
   rtw_fallback_class: B
   notes: "Joined oneworld as full member June 2025. Distance-based NTP. D class = 12.5% (lowest in alliance for business)."
+
+NU:
+  name: Japan Transocean Air
+  alliance: oneworld
+  eligible: true
+  ntp_method: distance
+  yq_tier: very_low
+  yq_estimate_per_segment: null   # no carrier-specific estimate; cost falls back to surcharges.yaml
+  rtw_booking_classes: {first: E, business: E, ione3: E, economy: L}   # NU international flights
+  rtw_booking_classes_domestic: {first: A, business: D, ione3: I, economy: L}   # JL/NU domestic flights
+  rtw_fallback_class: B
+  notes: "JAL group affiliate (Okinawa). Listed as an eligible carrier in Rule 3015 (27 FEB 2026). International flights book E on every RTW fare; domestic flights book like JL. Tier-point rate not yet confirmed (no ntp_rates.yaml entry)."
 
 S7:
   name: S7 Airlines
@@ -184,7 +206,7 @@ S7:
   ntp_method: distance
   yq_tier: low
   yq_estimate_per_segment: 40
-  rtw_booking_class: D
+  rtw_booking_classes: null
   notes: "Russian carrier. Suspended from oneworld Explorer due to EU/US/UK sanctions on Russian aviation. Technically still a oneworld member but flights cannot be ticketed on RTW itineraries."
 
 JQ:
@@ -195,7 +217,7 @@ JQ:
   ntp_method: null
   yq_tier: null
   yq_estimate_per_segment: null
-  rtw_booking_class: null
+  rtw_booking_classes: null
   notes: "QF codeshare on Jetstar. QF-marketed JQ-operated flights permitted on oneworld Explorer. When JQ included, AS/IB ticket stock cannot be used."
 
 # Ineligible carriers (for reference)
@@ -206,5 +228,5 @@ LA:
   ntp_method: null
   yq_tier: null
   yq_estimate_per_segment: null
-  rtw_booking_class: null
+  rtw_booking_classes: null
   notes: "Left oneworld 2020, joined SkyTeam. NOT eligible for oneworld Explorer."

@@ -1,0 +1,216 @@
+# oneworld-served stations, grouped by the oneworld Explorer continent each one
+# must resolve to (01-fare-rules.md §3). Used by tests/test_continents_coverage.py
+# to check that every station resolves, and to the right continent.
+#
+# This is a representative network sample (hubs, gateways, and the island and
+# boundary points that used to fall through the country table), not a complete
+# timetable.
+
+EU_ME:
+  # oneworld hubs and gateways
+  - LHR
+  - LGW
+  - LCY
+  - MAD
+  - BCN
+  - HEL
+  - DUB
+  - CDG
+  - FRA
+  - FCO
+  - ZRH
+  - AMS
+  - OSL
+  - ARN
+  - CPH
+  - LIS
+  - ATH
+  - IST
+  # Baltics and Nordic islands (Finnair / BA)
+  - RIX
+  - TLL
+  - VNO
+  - KEF
+  # Mediterranean islands (BA / Iberia)
+  - LCA
+  - PFO
+  - MLA
+  # North Africa counted as Europe/Middle East
+  - CMN
+  - RAK
+  - TUN
+  - ALG
+  # Middle East (QR / RJ)
+  - DOH
+  - AMM
+  - AQJ
+  - BEY
+  - DXB
+  - AUH
+  - RUH
+  - JED
+  - BAH
+  - KWI
+  - MCT
+  - CAI
+  - TLV
+  - BGW
+  # Russia west of the Urals
+  - SVO
+  - LED
+
+Africa:
+  - JNB
+  - CPT
+  - DUR
+  - NBO
+  - ADD
+  - LOS
+  - ACC
+  - DAR
+  - ZNZ
+  - MRU
+  - SEZ
+  - WDH
+  - LAD
+  - ABJ
+  - DSS
+  - TNR
+  - RUN
+
+Asia:
+  - HKG
+  - NRT
+  - HND
+  - KIX
+  - ICN
+  - TPE
+  - PVG
+  - PEK
+  - PKX
+  - SIN
+  - KUL
+  - BKK
+  - CGK
+  - DPS
+  - MNL
+  - SGN
+  - HAN
+  - DEL
+  - BOM
+  - BLR
+  - CMB
+  - MLE
+  - KTM
+  - DAC
+  - ISB
+  - ALA
+  - TAS
+  # Guam and the North Pacific (IATA TC3 South East Asia sub-area)
+  - GUM
+  - SPN
+  - ROR
+  - MAJ
+  - PNI
+  # Russia east of the Urals
+  - OVB
+  - VVO
+  - KHV
+
+SWP:
+  - SYD
+  - MEL
+  - BNE
+  - PER
+  - ADL
+  - CNS
+  - DRW
+  - AKL
+  - CHC
+  - WLG
+  - NAN
+  - SUV
+  - NOU
+  - VLI
+  - TBU
+  - APW
+  - PPT
+  - RAR
+  - PPG
+  - POM
+  - HIR
+  - TRW
+  - FUN
+  - INU
+
+N_America:
+  - JFK
+  - LGA
+  - EWR
+  - BOS
+  - ORD
+  - DFW
+  - MIA
+  - LAX
+  - SFO
+  - SEA
+  - PHX
+  - CLT
+  - PHL
+  - YYZ
+  - YVR
+  - YUL
+  - HNL
+  - OGG
+  - ANC
+  - MEX
+  - CUN
+  - PTY
+  - SJO
+  - GUA
+  - BZE
+  - SAL
+  - BDA
+  # Caribbean (AA / BA)
+  - NAS
+  - SJU
+  - STT
+  - ANU
+  - BGI
+  - GCM
+  - AUA
+  - CUR
+  - SXM
+  - UVF
+  - GND
+  - SKB
+  - POS
+  - TAB
+  - PLS
+  - KIN
+  - MBJ
+  - PUJ
+  - SDQ
+  - HAV
+  - PTP
+  - FDF
+  - EIS
+  - DOM
+  - SVD
+
+S_America:
+  - GRU
+  - GIG
+  - EZE
+  - SCL
+  - LIM
+  - BOG
+  - UIO
+  - GYE
+  - MVD
+  - ASU
+  - VVI
+  - CCS
+  - GEO
+  - PBM
+  - CAY

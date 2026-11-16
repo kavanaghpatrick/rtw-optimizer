@@ -1,0 +1,35 @@
+# AONE3 First ex-Helsinki mixing carriers whose First booking code differs.
+# Rule 3015 §5(b) (27 FEB 2026): First books A on AA/BA/CX/MH/QF/QR/JL/WY,
+# D on AS/AT/FJ/IB/RJ/UL and AY international, Y on AY domestic.
+# Expected First classes in segment order: Y, D, D, D, A, D.
+ticket:
+  type: AONE3
+  cabin: first
+  origin: HEL
+  passengers: 1
+
+segments:
+  - from: HEL
+    to: OUL
+    carrier: AY
+    type: stopover
+  - from: OUL
+    to: MAD
+    carrier: IB
+    type: stopover
+  - from: MAD
+    to: JFK
+    carrier: IB
+    type: stopover
+  - from: JFK
+    to: SEA
+    carrier: AS
+    type: stopover
+  - from: SEA
+    to: NRT
+    carrier: JL
+    type: stopover
+  - from: NRT
+    to: HEL
+    carrier: AY
+    type: final

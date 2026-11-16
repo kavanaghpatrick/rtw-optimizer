@@ -247,3 +247,42 @@ class TestVerifyResultConfirmed:
         ])
         assert result.total_flown == 1
         assert result.confirmed == 1
+
+
+# ------------------------------------------------------------------
+# Connection options: only complete origin->destination chains count
+# ------------------------------------------------------------------
+
+
+class TestConnectionOptions:
+    def test_leg_seats_without_complete_chain_do_not_count(self):
+        """Nonstop D0, SIN-BKK D9 but BKK-HKG D0: no bookable connection."""
+        dc = _dclass("SIN", "HKG", [
+            _flight("SIN", "HKG", 0, stops=0),
+            _flight("SIN", "BKK", 9, stops=0),
+            _flight("BKK", "HKG", 0, stops=0),
+        ], carrier="CX", status=DClassStatus.NOT_AVAILABLE)
+        assert dc.has_nonstop is False
+        assert len(dc.connection_options) == 1
+        assert dc.available_connections == []
+        assert dc.connection_seats == 0
+        assert dc.display_code == "D0* (0 conn)"
+
+    def test_connection_limited_by_lowest_leg(self):
+        dc = _dclass("LHR", "HKG", [
+            _flight("LHR", "HKG", 0, stops=0),
+            _flight("LHR", "BRU", 9, stops=0),
+            _flight("BRU", "HKG", 4, stops=0),
+        ], carrier="CX", status=DClassStatus.NOT_AVAILABLE)
+        assert dc.connection_seats == 4
+        assert dc.display_code == "D4* (1 conn)"
+
+    def test_unrelated_leg_never_counts(self):
+        dc = _dclass("LHR", "HKG", [
+            _flight("LHR", "HKG", 0, stops=0),
+            _flight("BRU", "MUC", 9, stops=0),
+        ], carrier="CX", status=DClassStatus.NOT_AVAILABLE)
+        assert dc.connection_options == []
+        result = VerifyResult(option_id=1, segments=[_seg("LHR", "HKG", "CX", dc)])
+        assert result.connection_only_segments == []
+        assert result.confirmed_any == 0

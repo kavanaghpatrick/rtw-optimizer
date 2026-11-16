@@ -27,8 +27,13 @@ from rtw.verify.models import (
 
 logger = logging.getLogger(__name__)
 
-_CACHE_TTL_HOURS = 24
+# D inventory moves within a day, so cached seat counts go stale quickly.
+_CACHE_TTL_HOURS = 6
 _CACHE_KEY_PREFIX = "dclass"
+
+# Only definitive answers are cached. An ERROR/UNKNOWN (failed scrape) must
+# never be replayed later as a sold-out D0.
+_CACHEABLE_STATUSES = (DClassStatus.AVAILABLE, DClassStatus.NOT_AVAILABLE)
 
 # Carriers with known married segment patterns (hub-connection)
 _MARRIED_CHECK_HUBS = {
@@ -72,7 +77,9 @@ class DClassVerifier:
         """
         if self._booking_class_override is not None:
             return self._booking_class_override
-        return get_booking_class(seg.carrier, self.cabin)
+        return get_booking_class(
+            seg.carrier, self.cabin, seg.origin, seg.destination
+        )
 
     def _cache_key(
         self, seg: SegmentVerification, booking_class: Optional[str] = None
@@ -91,24 +98,33 @@ class DClassVerifier:
     def _check_cache(
         self, seg: SegmentVerification, booking_class: Optional[str] = None
     ) -> Optional[DClassResult]:
-        """Look up cached result for a segment + booking class."""
+        """Look up cached result for a segment + booking class.
+
+        Keeps the stored status. A stored ERROR/UNKNOWN (left by older
+        versions) is ignored so the segment is re-scraped rather than shown
+        as sold out. Status is derived from seats only when none was stored.
+        """
         if self.cache is None:
             return None
         key = self._cache_key(seg, booking_class)
         cached = self.cache.get(key)
-        if cached is None:
+        if not isinstance(cached, dict):
             return None
         try:
-            result = DClassResult.model_validate(cached)
-            result.from_cache = True
-            result.status = (
-                DClassStatus.AVAILABLE
-                if result.seats > 0
-                else DClassStatus.NOT_AVAILABLE
-            )
-            return result
+            data = dict(cached)
+            if data.get("status") is None:
+                data["status"] = (
+                    DClassStatus.AVAILABLE
+                    if data.get("seats", 0) > 0
+                    else DClassStatus.NOT_AVAILABLE
+                )
+            result = DClassResult.model_validate(data)
         except Exception:
             return None
+        if result.status not in _CACHEABLE_STATUSES:
+            return None
+        result.from_cache = True
+        return result
 
     def _store_cache(
         self,
@@ -158,7 +174,8 @@ class DClassVerifier:
 
         if dclass:
             dclass.booking_class = booking_class
-            self._store_cache(seg, dclass, booking_class)
+            if dclass.status in _CACHEABLE_STATUSES:
+                self._store_cache(seg, dclass, booking_class)
             return dclass
 
         return DClassResult(
@@ -178,16 +195,24 @@ class DClassVerifier:
         """Whether to scan the fallback class after the primary result.
 
         Only when fallback is enabled, no explicit override is in force, the
-        primary is definitively unavailable (D0, not ERROR/UNKNOWN), and the
-        carrier has a fallback class defined.
+        primary scan succeeded (not ERROR/UNKNOWN) but found no nonstop seats,
+        and the carrier has a fallback class defined. Seats on connection
+        legs don't count: the segment is booked as the nonstop.
         """
         if not self._enable_fallback:
             return False
         if self._booking_class_override is not None:
             return False
-        if primary.status != DClassStatus.NOT_AVAILABLE:
+        if primary.status in (DClassStatus.ERROR, DClassStatus.UNKNOWN):
             return False
-        return get_fallback_class(seg.carrier, self.cabin) is not None
+        if primary.has_nonstop:
+            return False
+        return (
+            get_fallback_class(
+                seg.carrier, self.cabin, seg.origin, seg.destination
+            )
+            is not None
+        )
 
     def _check_married_pattern(
         self, seg: SegmentVerification, result: DClassResult
@@ -208,13 +233,11 @@ class DClassVerifier:
             return None
         hub = _MARRIED_CHECK_HUBS[carrier]
 
-        # Pattern 1: Neither endpoint is the hub — check nonstop vs connection
+        # Pattern 1: Neither endpoint is the hub — check nonstop vs connection.
+        # Connection legs parse as separate rows with stops=0, so detect
+        # connections by chaining legs from origin to destination.
         if seg.origin != hub and seg.destination != hub:
-            nonstop_seats = result.nonstop_seats
-            connecting_with_seats = [
-                f for f in result.flights if f.stops > 0 and f.seats > 0
-            ]
-            if nonstop_seats == 0 and connecting_with_seats:
+            if result.nonstop_seats == 0 and result.available_connections:
                 return (
                     f"{result.booking_class}-class only via connection "
                     f"(likely married through {hub})"
@@ -224,12 +247,12 @@ class DClassVerifier:
         # Pattern 2: Segment touches the hub — O&D control warning
         # EF shows leg-level availability but the airline may block
         # standalone D-class at the hub for RTW fares
-        if result.seats > 0:
+        if result.nonstop_seats > 0:
             carrier_name = "Cathay Pacific" if carrier == "CX" else "Qatar Airways"
             return (
                 f"O&D control: {carrier_name} uses origin-destination revenue "
                 f"management at {hub}. EF shows {result.booking_class}"
-                f"{result.seats} but D-class may be unbookable standalone "
+                f"{result.nonstop_seats} but D-class may be unbookable standalone "
                 f"on RTW fares. Present to agent as connected routing "
                 f"(e.g., {seg.origin}-[next city] via {hub}) rather than "
                 f"standalone {seg.origin}-{seg.destination}."
@@ -310,7 +333,9 @@ class DClassVerifier:
                 # (H on AA, B otherwise). Best-effort: failures leave fallback
                 # unset rather than failing the whole segment.
                 if self._should_scan_fallback(seg, dclass):
-                    fb_class = get_fallback_class(seg.carrier, self.cabin)
+                    fb_class = get_fallback_class(
+                        seg.carrier, self.cabin, seg.origin, seg.destination
+                    )
                     try:
                         verified.fallback = self._scan_class(seg, fb_class, no_cache)
                     except SessionExpiredError:

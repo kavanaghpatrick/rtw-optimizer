@@ -254,3 +254,46 @@ class TestDisplayVerifyResult:
         # Should still show summary but not per-flight detail
         assert "D9" in captured.err
         assert "CX252" not in captured.err
+
+
+class TestCacheAgeNote:
+    """Cached availability is labelled with its age, live results are not."""
+
+    def _dclass(self, from_cache, hours_old):
+        from rtw.verify.models import DClassResult, DClassStatus
+
+        return DClassResult(
+            status=DClassStatus.AVAILABLE, seats=9, carrier="CX",
+            origin="LHR", destination="HKG",
+            target_date=datetime.date(2026, 3, 10),
+            checked_at=datetime.datetime.now(datetime.timezone.utc)
+            - datetime.timedelta(hours=hours_old, minutes=5),
+            from_cache=from_cache,
+        )
+
+    def test_live_result_has_no_note(self):
+        from rtw.cli import _cache_age_note
+
+        assert _cache_age_note(self._dclass(False, 3)) == ""
+
+    def test_cached_hours(self):
+        from rtw.cli import _cache_age_note
+
+        assert _cache_age_note(self._dclass(True, 3)) == " (cached 3h ago)"
+
+    def test_cached_minutes(self):
+        from rtw.cli import _cache_age_note
+
+        assert _cache_age_note(self._dclass(True, 0)) == " (cached 5m ago)"
+
+    def test_shown_in_verify_table(self, capsys):
+        from rtw.cli import _display_verify_result
+        from rtw.verify.models import SegmentVerification, VerifyResult
+
+        seg = SegmentVerification(
+            index=0, segment_type="FLOWN", origin="LHR", destination="HKG",
+            carrier="CX", target_date=datetime.date(2026, 3, 10),
+            dclass=self._dclass(True, 3),
+        )
+        _display_verify_result(VerifyResult(option_id=1, segments=[seg]))
+        assert "cached" in capsys.readouterr().err

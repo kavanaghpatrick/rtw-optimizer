@@ -181,66 +181,79 @@ class ExpertFlyerScraper:
         page.goto(_LOGIN_URL, timeout=_PAGE_LOAD_TIMEOUT)
         time.sleep(3)
 
-        if "auth.expertflyer.com" not in page.url:
-            # Already logged in or unexpected page
-            if "www.expertflyer.com" in page.url:
-                self._logged_in = True
-                return True
-            return False
-
-        # Fill Auth0 login form
         try:
-            # Email field
-            page.wait_for_selector(
-                'input[name="email"], input[name="username"], input[type="email"]',
-                timeout=10000,
-            )
+            # EF now serves a first-party login page at
+            # www.expertflyer.com/auth/login (email + password on one screen).
+            # Presence of a login form — not the hostname — decides whether
+            # we still need to authenticate.
             email_input = (
-                page.query_selector('input[name="email"]')
+                page.query_selector('input[autocomplete="email"]')
+                or page.query_selector('input[name="email"]')
                 or page.query_selector('input[name="username"]')
                 or page.query_selector('input[type="email"]')
             )
-            if not email_input:
-                logger.error("Email input not found on Auth0 page")
+            if email_input is None:
+                # No login form: either already authenticated or an
+                # unexpected page. Treat the main site without a form as
+                # logged in.
+                if (
+                    "www.expertflyer.com" in page.url
+                    and "/auth/" not in page.url
+                ):
+                    self._logged_in = True
+                    return True
+                logger.error(
+                    "No login form found. URL: %s", page.url[:80]
+                )
                 return False
 
             email_input.fill(username)
 
-            # Click continue (Auth0 may split email/password screens)
-            submit = page.query_selector('button[type="submit"]')
-            if submit:
-                submit.click()
-                time.sleep(2)
-
-            # Password field
             pwd_input = (
-                page.query_selector('input[name="password"]')
+                page.query_selector('input[autocomplete="current-password"]')
+                or page.query_selector('input[name="password"]')
                 or page.query_selector('input[type="password"]')
             )
-            if not pwd_input:
+            if pwd_input is None:
+                # Legacy Auth0 split email/password screens: continue first.
+                submit = page.query_selector('button[type="submit"]')
+                if submit:
+                    submit.click()
+                    time.sleep(2)
+                pwd_input = (
+                    page.query_selector(
+                        'input[autocomplete="current-password"]'
+                    )
+                    or page.query_selector('input[name="password"]')
+                    or page.query_selector('input[type="password"]')
+                )
+            if pwd_input is None:
                 logger.error("Password input not found")
                 return False
 
             pwd_input.fill(password)
 
-            # Submit login
-            submit = page.query_selector('button[type="submit"]')
+            submit = page.query_selector(
+                'button[type="submit"]'
+            ) or page.query_selector('button:has-text("Log In")')
             if submit:
                 submit.click()
-                time.sleep(5)
+            else:
+                pwd_input.press("Enter")
 
-            # Verify login succeeded
-            if "www.expertflyer.com" in page.url:
-                self._logged_in = True
-                logger.info("ExpertFlyer login successful")
-                return True
-
-            # May still be on auth page with redirect pending
-            time.sleep(3)
-            if "www.expertflyer.com" in page.url:
-                self._logged_in = True
-                logger.info("ExpertFlyer login successful (delayed redirect)")
-                return True
+            # Verify login succeeded: wait for the login form to go away
+            # and the URL to leave the auth flow.
+            for _ in range(10):
+                time.sleep(2)
+                if (
+                    "/auth/" not in page.url
+                    and "auth.expertflyer.com" not in page.url
+                    and page.query_selector('input[autocomplete="current-password"]')
+                    is None
+                ):
+                    self._logged_in = True
+                    logger.info("ExpertFlyer login successful")
+                    return True
 
             logger.error("Login failed. URL: %s", page.url[:80])
             return False
@@ -408,8 +421,121 @@ class ExpertFlyerScraper:
             origin=origin,
             destination=dest,
             target_date=date,
+            booking_class=booking_class,
             error_message=str(last_error),
         )
+
+    def enumerate_flights(
+        self,
+        origin: str,
+        dest: str,
+        date: datetime.date,
+        booking_class: str = "D",
+    ) -> list[dict]:
+        """Enumerate ALL flights (incl. codeshares) on a route/date.
+
+        Unlike ``check_availability`` (which reduces to one D-class verdict),
+        this returns one row per MARKETING flight number ExpertFlyer lists --
+        i.e. every codeshare selling each physical flight, each with its own
+        D-class seat count. Rows feed the codeshare checker (``rtw.codeshare``).
+
+        Each row: ``{marketing_carrier, marketing_flight, operating_carrier,
+        depart_time, d_seats}``. Returns ``[]`` if credentials are missing or
+        all retries fail.
+        """
+        if _get_credentials() is None and not self._session_path:
+            logger.info("No ExpertFlyer credentials configured")
+            return []
+
+        self._rate_limit_wait()
+        self._query_count += 1
+        # carrier="" -> all marketing carriers, so codeshares appear
+        url = self._build_results_url(origin, dest, date, booking_class, "")
+
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                self._ensure_logged_in()
+                rows = self._fetch_flights(url, origin, dest, booking_class)
+                self._last_call_time = time.time()
+                return rows
+            except SessionExpiredError:
+                if attempt < _MAX_RETRIES:
+                    self._logged_in = False
+                    continue
+                raise
+            except RateLimitError:
+                if attempt < _MAX_RETRIES:
+                    time.sleep(60 * attempt)
+            except ScrapeError as exc:
+                if attempt < _MAX_RETRIES:
+                    delay = _RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                    time.sleep(delay + delay * random.uniform(-_RETRY_JITTER, _RETRY_JITTER))
+                else:
+                    logger.warning("enumerate_flights failed: %s", exc)
+            except Exception as exc:  # noqa: BLE001 - scraper resilience
+                if attempt < _MAX_RETRIES:
+                    time.sleep(_RETRY_BASE_DELAY)
+                else:
+                    logger.warning("enumerate_flights error: %s", exc)
+
+        self._last_call_time = time.time()
+        return []
+
+    def _fetch_flights(
+        self, url: str, origin: str, dest: str, booking_class: str
+    ) -> list[dict]:
+        """Navigate to the results URL and parse every flight row."""
+        page = self._page
+        logger.info("ExpertFlyer: enumerating %s→%s", origin, dest)
+        page.goto(url, timeout=_PAGE_LOAD_TIMEOUT)
+        time.sleep(2)
+        self._check_session_expired(page)
+        self._check_rate_limited(page)
+        try:
+            page.wait_for_selector("table.w-full.bg-white", timeout=_RESULTS_TIMEOUT)
+        except Exception:
+            self._check_session_expired(page)
+            self._check_rate_limited(page)
+            raise ScrapeError(
+                f"Results table not found for {origin}→{dest}",
+                error_type="PARSE_ERROR",
+            )
+        return self._parse_flight_rows(page, booking_class)
+
+    def _parse_flight_rows(self, page, booking_class: str) -> list[dict]:
+        """Parse every flight row (incl. codeshares) into codeshare-row dicts.
+
+        ``marketing_carrier``/``marketing_flight`` are the ticketed (marketing)
+        carrier; ``operating_carrier`` from any "operated by XX" text;
+        ``d_seats`` is the booking-class seat count under that marketing code.
+        """
+        rows_out: list[dict] = []
+        rows = page.query_selector_all("tr.table-custom-hover-group")
+        for row in rows:
+            text = row.evaluate("el => (el.innerText || '')")
+
+            fn_match = re.match(r"\s*([A-Z\d]{2})\s*\n\s*(\d{1,4})\b", text)
+            if fn_match is None:
+                continue
+            marketing_carrier = fn_match.group(1)
+            marketing_flight = f"{fn_match.group(1)}{fn_match.group(2)}"
+
+            d_match = re.search(rf"\b{booking_class}(\d)\b", text)
+            d_seats = int(d_match.group(1)) if d_match else None
+
+            op_match = re.search(r"[Oo]perated by\s+([A-Z0-9]{2})", text)
+            operating_carrier = op_match.group(1) if op_match else None
+
+            times = re.findall(r"(\d{2}/\d{2}/\d{2}\s+\d{1,2}:\d{2}\s+[AP]M)", text)
+
+            rows_out.append({
+                "marketing_carrier": marketing_carrier,
+                "marketing_flight": marketing_flight,
+                "operating_carrier": operating_carrier,
+                "depart_time": times[0] if times else None,
+                "d_seats": d_seats,
+            })
+        return rows_out
 
     def _fetch_and_parse(
         self,
@@ -437,7 +563,7 @@ class ExpertFlyerScraper:
         # Wait for results table
         try:
             page.wait_for_selector(
-                "table.w-full.bg-white.shadow-md",
+                "table.w-full.bg-white",
                 timeout=_RESULTS_TIMEOUT,
             )
         except Exception:
@@ -469,7 +595,7 @@ class ExpertFlyerScraper:
         flights: list[FlightAvailability] = []
 
         try:
-            rows = page.query_selector_all("tr.hover\\:bg-sky-50")
+            rows = page.query_selector_all("tr.table-custom-hover-group")
             for row in rows:
                 text = row.evaluate("el => (el.innerText || '')")
 
@@ -544,19 +670,23 @@ class ExpertFlyerScraper:
                     target_date=date,
                 )
 
-            seat_counts = [int(m) for m in matches]
-            best_seats = max(seat_counts)
-            flight_number = self._extract_flight_number(page, carrier)
-
-            status = DClassStatus.AVAILABLE if best_seats > 0 else DClassStatus.NOT_AVAILABLE
+            # Seat codes are on the page but no flight row could be read, so
+            # they can't be tied to a nonstop origin->dest flight (they may be
+            # legs of connections via other cities). Don't claim either way.
             return DClassResult(
-                status=status,
-                seats=best_seats,
-                flight_number=flight_number,
+                status=DClassStatus.UNKNOWN,
+                seats=0,
+                flight_number=self._extract_flight_number(page, carrier),
                 carrier=carrier or "??",
                 origin=origin,
                 destination=dest,
                 target_date=date,
+                booking_class=booking_class,
+                error_message=(
+                    f"{booking_class} seat codes found but no flight rows could "
+                    f"be parsed, so they can't be matched to a {origin}-{dest} "
+                    f"nonstop"
+                ),
             )
 
         # Deduplicate flights by flight_number + depart_time
@@ -569,29 +699,37 @@ class ExpertFlyerScraper:
                 unique_flights.append(f)
         flights = unique_flights
 
-        # Build result from per-flight data
-        best_seats = max(f.seats for f in flights)
-        # Set flight_number to the best-D-class flight
-        best_flight = max(flights, key=lambda f: (f.seats, -(len(f.depart_time or ""))))
-        flight_number = best_flight.flight_number
-
-        status = DClassStatus.AVAILABLE if best_seats > 0 else DClassStatus.NOT_AVAILABLE
-
-        return DClassResult(
-            status=status,
-            seats=best_seats,
-            flight_number=flight_number,
+        # Build the verdict only from flights that match the requested O&D.
+        # Rows for connection legs via other cities (e.g. LHR-BRU, BRU-HKG)
+        # stay in `flights` for display but never make the segment AVAILABLE.
+        result = DClassResult(
+            status=DClassStatus.NOT_AVAILABLE,
+            seats=0,
             carrier=carrier or "??",
             origin=origin,
             destination=dest,
             target_date=date,
+            booking_class=booking_class,
             flights=flights,
         )
+        nonstops = result.nonstop_flights
+        if nonstops:
+            best_flight = max(nonstops, key=lambda f: f.seats)
+            result.status = DClassStatus.AVAILABLE
+            result.seats = best_flight.seats
+            result.flight_number = best_flight.flight_number
+        else:
+            # No nonstop seats: report the best complete connection (lowest
+            # leg limits it) as a signal, but status stays NOT_AVAILABLE.
+            result.seats = result.connection_seats
+            od_rows = [f for f in flights if f.origin == origin and f.destination == dest]
+            result.flight_number = od_rows[0].flight_number if od_rows else None
+        return result
 
     def _extract_flight_number(self, page, carrier: str) -> Optional[str]:
         """Try to extract the first flight number from results."""
         try:
-            rows = page.query_selector_all("tr.hover\\:bg-sky-50")
+            rows = page.query_selector_all("tr.table-custom-hover-group")
             if rows:
                 text = rows[0].evaluate(
                     "el => (el.innerText || '').substring(0, 100)"
@@ -626,7 +764,7 @@ def parse_availability_html(
         re.DOTALL,
     )
     row_pattern = re.compile(
-        r"<tr[^>]*hover:bg-sky-50[^>]*>(.*?)</tr>",
+        r"<tr[^>]*table-custom-hover-group[^>]*>(.*?)</tr>",
         re.DOTALL,
     )
 
