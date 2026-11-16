@@ -1,9 +1,44 @@
 """Tests for rtw.cost CostEstimator."""
 
+import sqlite3
+from pathlib import Path
+
 import pytest
 
 from rtw.models import CostEstimate, Itinerary, TicketType
-from rtw.cost import CostEstimator, FareLookupError
+from rtw.cost import CostEstimator, FareLookupError, FareSource
+
+_FARES_DB = Path(__file__).parent.parent / "rtw" / "data" / "fares.db"
+
+
+def _db_min(origins, fare_basis):
+    """Cheapest filed fare for any of the given db origin codes, read straight from fares.db."""
+    origins = [origins] if isinstance(origins, str) else list(origins)
+    con = sqlite3.connect(_FARES_DB)
+    try:
+        row = con.execute(
+            f"SELECT MIN(fare_usd) FROM fares WHERE fare_basis = ? "
+            f"AND origin IN ({','.join('?' * len(origins))})",
+            [fare_basis, *origins],
+        ).fetchone()
+    finally:
+        con.close()
+    return row[0]
+
+
+def _db_carriers_at_min(origins, fare_basis):
+    origins = [origins] if isinstance(origins, str) else list(origins)
+    fare = _db_min(origins, fare_basis)
+    con = sqlite3.connect(_FARES_DB)
+    try:
+        rows = con.execute(
+            f"SELECT DISTINCT carrier FROM fares WHERE fare_basis = ? AND fare_usd = ? "
+            f"AND origin IN ({','.join('?' * len(origins))})",
+            [fare_basis, fare, *origins],
+        ).fetchall()
+    finally:
+        con.close()
+    return {r[0] for r in rows}
 
 
 @pytest.fixture
@@ -32,22 +67,46 @@ def _make_itinerary(segments, origin="CAI", ticket_type="DONE4", passengers=1, c
 
 
 class TestBaseFare:
-    """Base fare lookup from fares.yaml."""
+    """Base fare lookup goes through FareSource (cheapest filed fare in fares.db)."""
 
-    def test_cai_done4_in_range(self, estimator):
-        """CAI DONE4 should be $3500-$5000."""
-        fare = estimator.get_base_fare("CAI", TicketType.DONE4)
-        assert 3500 <= fare <= 5000, f"CAI DONE4 = ${fare}, expected $3500-$5000"
+    @pytest.mark.parametrize(
+        "origin,db_codes,basis",
+        [
+            ("CAI", ["CAI"], "DONE4"),
+            ("CAI", ["CAI"], "DONE3"),
+            ("OSL", ["OSL"], "LONE4"),
+            ("SYD", ["SYD"], "DONE4"),
+            ("JFK", ["JFK"], "DONE4"),
+            ("LAX", ["LAX"], "DONE4"),
+            ("KHI", ["KHI"], "DONE3"),
+            ("DEL", ["DEL"], "DONE3"),
+            ("BOM", ["BOM"], "DONE3"),
+        ],
+    )
+    def test_matches_fares_db_min(self, estimator, origin, db_codes, basis):
+        fare = estimator.get_base_fare(origin, TicketType(basis))
+        assert fare == pytest.approx(_db_min(db_codes, basis))
 
-    def test_cai_done4_exact(self, estimator):
-        """CAI DONE4 should be $4000 per fares.yaml."""
-        fare = estimator.get_base_fare("CAI", TicketType.DONE4)
-        assert fare == 4000
+    def test_london_airports_use_city_code(self, estimator):
+        """LHR/LGW/LCY resolve to the LON filings (cheapest across LON and LHR rows)."""
+        expected = _db_min(["LON", "LHR"], "DONE4")
+        for code in ("LHR", "LGW", "LCY", "LON"):
+            assert estimator.get_base_fare(code, TicketType.DONE4) == pytest.approx(expected)
+        assert estimator.fare_source.get("LHR", "DONE4").origin == "LON"
 
-    def test_jfk_most_expensive(self, estimator):
-        """JFK should be the most expensive origin for DONE4."""
-        fare = estimator.get_base_fare("JFK", TicketType.DONE4)
-        assert fare == 10500
+    def test_tokyo_airports_and_city_code(self, estimator):
+        """fares.db has NRT and HND rows but no TYO row; all three resolve to Tokyo."""
+        expected = _db_min(["NRT", "HND"], "DONE4")
+        assert _db_min(["TYO"], "DONE4") is None
+        for code in ("NRT", "HND", "TYO"):
+            assert estimator.get_base_fare(code, TicketType.DONE4) == pytest.approx(expected)
+
+    def test_unfiled_aone_returns_zero_not_estimate(self, estimator):
+        """SYD and JNB file no AONE3; no 1.6x synthetic fare is returned."""
+        for origin in ("SYD", "JNB"):
+            assert _db_min([origin], "AONE3") is None
+            assert estimator.get_base_fare(origin, TicketType.AONE3) == 0.0
+            assert estimator.fare_source.get(origin, TicketType.AONE3) is None
 
     def test_unknown_origin_returns_zero(self, estimator):
         """Unknown origin should return 0."""
@@ -56,12 +115,61 @@ class TestBaseFare:
 
     def test_case_insensitive(self, estimator):
         """Origin lookup should be case-insensitive."""
-        fare = estimator.get_base_fare("cai", TicketType.DONE4)
-        assert fare == 4000
+        assert estimator.get_base_fare("cai", TicketType.DONE4) == estimator.get_base_fare(
+            "CAI", TicketType.DONE4
+        )
+
+
+class TestFareSource:
+    """Provenance, metadata and overrides of the single fare source."""
+
+    def test_quote_names_filing_carrier(self):
+        quote = FareSource().get("CAI", TicketType.DONE4)
+        assert set(quote.carrier.split("/")) == _db_carriers_at_min("CAI", "DONE4")
+        assert quote.source == "fares.db"
+        assert quote.carrier in quote.note
+
+    def test_data_date_from_metadata_table(self):
+        con = sqlite3.connect(_FARES_DB)
+        try:
+            built = dict(con.execute("SELECT key, value FROM metadata").fetchall())[
+                "source_built"
+            ]
+        finally:
+            con.close()
+        fs = FareSource()
+        assert fs.data_date == built[:10]
+        assert built[:10] in fs.get("OSL", "DONE3").note
+
+    def test_override_wins_and_is_labelled(self, tmp_path):
+        overrides = tmp_path / "fares.yaml"
+        overrides.write_text(
+            "overrides:\n  LHR:\n    DONE3: {fare_usd: 7000, carrier: BA, "
+            "source: 'test quote'}\n"
+        )
+        fs = FareSource(overrides_path=overrides)
+        quote = fs.get("LGW", "DONE3")
+        assert quote.fare_usd == 7000
+        assert quote.source == "fares.yaml override"
+        assert "test quote" in quote.note
+        # Other fare bases still come from fares.db
+        assert fs.get("LHR", "DONE4").fare_usd == pytest.approx(
+            _db_min(["LON", "LHR"], "DONE4")
+        )
+
+    def test_override_without_source_rejected(self, tmp_path):
+        overrides = tmp_path / "fares.yaml"
+        overrides.write_text("overrides:\n  OSL:\n    DONE3: {fare_usd: 1}\n")
+        with pytest.raises(ValueError, match="source"):
+            FareSource(overrides_path=overrides)
+
+    def test_shipped_overrides_all_name_a_source(self):
+        """Loading the shipped fares.yaml must succeed (every override has a source)."""
+        FareSource()
 
 
 class TestCompareOrigins:
-    """Origin comparison sorted by fare."""
+    """Origin comparison ranks every origin in fares.db."""
 
     def test_sorted_cheapest_first(self, estimator):
         """Results should be sorted cheapest first."""
@@ -69,47 +177,64 @@ class TestCompareOrigins:
         fares = [r["fare_usd"] for r in results]
         assert fares == sorted(fares)
 
-    def test_cai_cheapest_for_done4(self, estimator):
-        """CAI should be the cheapest origin for DONE4."""
-        results = estimator.compare_origins(TicketType.DONE4)
-        assert results[0]["origin"] == "CAI"
+    def test_cheapest_matches_db_global_min(self, estimator):
+        """The top-ranked fare is the lowest filed DONE3 fare anywhere in fares.db."""
+        results = estimator.compare_origins(TicketType.DONE3)
+        con = sqlite3.connect(_FARES_DB)
+        try:
+            db_origin, db_fare = con.execute(
+                "SELECT origin, MIN(fare_usd) FROM fares WHERE fare_basis = 'DONE3'"
+            ).fetchone()
+        finally:
+            con.close()
+        assert results[0]["fare_usd"] == pytest.approx(db_fare)
+        assert results[0]["origin"] == db_origin
 
-    def test_jfk_most_expensive_for_done4(self, estimator):
-        """JFK should be the most expensive origin for DONE4."""
-        results = estimator.compare_origins(TicketType.DONE4)
-        assert results[-1]["origin"] == "JFK"
-
-    def test_origin_ordering_done4(self, estimator):
-        """Check relative ordering: CAI < JNB < OSL < NRT < LHR < JFK."""
-        results = estimator.compare_origins(TicketType.DONE4)
-        origins = [r["origin"] for r in results]
-        # Verify these origins appear in correct relative order
-        for earlier, later in [
-            ("CAI", "JNB"),
-            ("JNB", "OSL"),
-            ("OSL", "NRT"),
-            ("NRT", "LHR"),
-            ("LHR", "JFK"),
-        ]:
-            assert origins.index(earlier) < origins.index(later), (
-                f"{earlier} should be cheaper than {later}"
-            )
-
-    def test_all_origins_present(self, estimator):
-        """All origins from fares.yaml should appear."""
+    def test_ranks_all_db_origins(self, estimator):
+        """Every origin filing DONE4 appears (metro airports collapsed to one city)."""
+        con = sqlite3.connect(_FARES_DB)
+        try:
+            db_origins = {
+                r[0]
+                for r in con.execute(
+                    "SELECT DISTINCT origin FROM fares WHERE fare_basis = 'DONE4'"
+                )
+            }
+        finally:
+            con.close()
         results = estimator.compare_origins(TicketType.DONE4)
         origins = {r["origin"] for r in results}
-        assert {"CAI", "OSL", "JNB", "NRT", "LHR", "JFK", "SYD", "CMB"}.issubset(origins)
+        assert len(results) == len(origins)  # one row per origin
+        assert len(origins) > 100
+        assert {"KHI", "DEL", "BOM", "CAI", "OSL", "LON", "TYO", "LAX"}.issubset(origins)
+        assert "LHR" not in origins and "NRT" not in origins  # collapsed into LON/TYO
+        assert len(origins) >= len(db_origins) - 10
+
+    def test_khi_cheaper_than_cai_for_done3(self, estimator):
+        """Cairo is not the cheapest: Karachi files DONE3 below Cairo."""
+        results = estimator.compare_origins(TicketType.DONE3)
+        origins = [r["origin"] for r in results]
+        assert _db_min("KHI", "DONE3") < _db_min("CAI", "DONE3")
+        assert origins.index("KHI") < origins.index("CAI")
+
+    def test_continent_filter(self, estimator):
+        results = estimator.compare_origins(TicketType.DONE4, continent="EU_ME")
+        assert results
+        assert all(r["continent"] == "Europe/Middle East" for r in results)
+        assert {"CAI", "OSL", "LON"}.issubset({r["origin"] for r in results})
+        label = estimator.compare_origins(TicketType.DONE4, continent="Europe/Middle East")
+        assert [r["origin"] for r in label] == [r["origin"] for r in results]
+
+    def test_unfiled_aone3_origins_absent(self, estimator):
+        origins = {r["origin"] for r in estimator.compare_origins(TicketType.AONE3)}
+        assert "SYD" not in origins and "JNB" not in origins
 
     def test_result_has_expected_keys(self, estimator):
-        """Each result should have origin, name, fare_usd, currency, notes."""
+        """Each result should have origin, name, fare_usd, currency, notes, carrier."""
         results = estimator.compare_origins(TicketType.DONE4)
         for r in results:
-            assert "origin" in r
-            assert "name" in r
-            assert "fare_usd" in r
-            assert "currency" in r
-            assert "notes" in r
+            for key in ("origin", "name", "fare_usd", "currency", "notes", "carrier"):
+                assert key in r
 
 
 # ------------------------------------------------------------------
@@ -303,13 +428,29 @@ class TestTotalEstimate:
         result = estimator.estimate_total(itin)
         assert result.total_all_pax_usd == pytest.approx(result.total_per_person_usd * 2)
 
-    def test_v3_per_person_in_range(self, estimator, v3_itinerary):
-        """V3 per-person cost should be $4,000-$8,000."""
+    def test_v3_per_person_uses_filed_fare(self, estimator, v3_itinerary):
+        """V3 (ex-CAI DONE4) per-person cost = filed CAI DONE4 fare + YQ."""
         itin = Itinerary.model_validate(v3_itinerary)
         result = estimator.estimate_total(itin)
-        assert 4_000 <= result.total_per_person_usd <= 8_000, (
-            f"V3 per-person ${result.total_per_person_usd:.0f} outside $4,000-$8,000"
+        assert result.base_fare_usd == pytest.approx(_db_min("CAI", "DONE4"))
+        assert result.total_per_person_usd == pytest.approx(
+            _db_min("CAI", "DONE4") + result.total_yq_usd
         )
+
+    def test_estimate_shows_fare_source_and_date(self, estimator, v3_itinerary):
+        itin = Itinerary.model_validate(v3_itinerary)
+        result = estimator.estimate_total(itin)
+        assert "fares.db" in result.fare_source
+        assert estimator.fare_source.data_date in result.fare_source
+        assert set(result.fare_carrier.split("/")) == _db_carriers_at_min("CAI", "DONE4")
+
+    def test_lax_origin_now_costed(self, estimator):
+        """LAX was missing from the old fare table; it files DONE4 in fares.db."""
+        itin = _make_itinerary(
+            [{"from": "LAX", "to": "LHR", "carrier": "BA"}], origin="LAX"
+        )
+        result = estimator.estimate_total(itin)
+        assert result.base_fare_usd == pytest.approx(_db_min("LAX", "DONE4"))
 
     def test_v3_origin_and_ticket_type(self, estimator, v3_itinerary):
         """V3 estimate should reflect CAI origin and DONE4 ticket type."""
@@ -356,46 +497,51 @@ class TestTotalEstimate:
 
 
 class TestAONEFares:
-    """AONE first class fares from fares.yaml."""
+    """AONE first class fares come only from filed rows in fares.db."""
 
     _ORIGINS = ["CAI", "OSL", "JNB", "NRT", "CMB", "LHR", "JFK", "SYD"]
+    _DB_CODES = {"NRT": ["NRT", "HND"], "LHR": ["LON", "LHR"]}
     _AONE_TYPES = [TicketType.AONE3, TicketType.AONE4, TicketType.AONE5, TicketType.AONE6]
+    _DONE_TYPES = [TicketType.DONE3, TicketType.DONE4, TicketType.DONE5, TicketType.DONE6]
 
-    def test_aone_fares_nonzero(self, estimator):
-        """AONE4 fare should be > 0 for all 8 origins."""
-        for origin in self._ORIGINS:
-            fare = estimator.get_base_fare(origin, TicketType.AONE4)
-            assert fare > 0, f"AONE4 fare for {origin} is $0"
+    def _codes(self, origin):
+        return self._DB_CODES.get(origin, [origin])
 
-    def test_aone_fares_all_origins_all_types(self, estimator):
-        """All 32 AONE entries should be > 0."""
+    def test_aone_matches_db_or_absent(self, estimator):
+        """Every AONE fare equals the filed min; unfiled combinations return 0."""
         for origin in self._ORIGINS:
             for tt in self._AONE_TYPES:
+                expected = _db_min(self._codes(origin), tt.value)
                 fare = estimator.get_base_fare(origin, tt)
-                assert fare > 0, f"{tt.value} fare for {origin} is $0"
+                if expected is None:
+                    assert fare == 0.0, f"{origin}/{tt.value} has no filed row"
+                else:
+                    assert fare == pytest.approx(expected), f"{origin}/{tt.value}"
 
     def test_aone_more_than_done(self, estimator):
-        """AONE should be more expensive than DONE for same origin+continent count."""
-        done_types = [TicketType.DONE3, TicketType.DONE4, TicketType.DONE5, TicketType.DONE6]
+        """Where both are filed, AONE is more expensive than DONE for the same origin."""
         for origin in self._ORIGINS:
-            for aone, done in zip(self._AONE_TYPES, done_types):
+            for aone, done in zip(self._AONE_TYPES, self._DONE_TYPES):
                 aone_fare = estimator.get_base_fare(origin, aone)
                 done_fare = estimator.get_base_fare(origin, done)
+                if aone_fare == 0.0:
+                    continue
                 assert aone_fare > done_fare, (
                     f"{origin}: {aone.value}=${aone_fare} should be > {done.value}=${done_fare}"
                 )
 
-    def test_aone_done_ratio_in_range(self, estimator):
-        """AONE/DONE ratio should be in 1.4-1.8x range."""
-        done_types = [TicketType.DONE3, TicketType.DONE4, TicketType.DONE5, TicketType.DONE6]
+    def test_aone_done_ratio_matches_db(self, estimator):
+        """AONE/DONE ratio equals the ratio of the filed fares (no fixed 1.6x multiplier)."""
         for origin in self._ORIGINS:
-            for aone, done in zip(self._AONE_TYPES, done_types):
-                aone_fare = estimator.get_base_fare(origin, aone)
-                done_fare = estimator.get_base_fare(origin, done)
-                ratio = aone_fare / done_fare
-                assert 1.4 <= ratio <= 1.8, (
-                    f"{origin}: {aone.value}/{done.value} ratio = {ratio:.2f}, expected 1.4-1.8"
+            for aone, done in zip(self._AONE_TYPES, self._DONE_TYPES):
+                db_aone = _db_min(self._codes(origin), aone.value)
+                db_done = _db_min(self._codes(origin), done.value)
+                if db_aone is None or db_done is None:
+                    continue
+                ratio = estimator.get_base_fare(origin, aone) / estimator.get_base_fare(
+                    origin, done
                 )
+                assert ratio == pytest.approx(db_aone / db_done)
 
 
 # ------------------------------------------------------------------
@@ -439,11 +585,11 @@ class TestDONE3Fixture:
         result = estimator.estimate_total(itin)
         assert result.base_fare_usd > 0
 
-    def test_done3_per_person_in_range(self, estimator, done3_itinerary):
-        """DONE3 per-person cost should be reasonable ($3,000-$6,000)."""
+    def test_done3_base_fare_matches_db(self, estimator, done3_itinerary):
+        """DONE3 fixture (ex-CAI) base fare is the filed CAI DONE3 fare."""
         itin = Itinerary.model_validate(done3_itinerary)
         result = estimator.estimate_total(itin)
-        assert 3_000 <= result.total_per_person_usd <= 6_000
+        assert result.base_fare_usd == pytest.approx(_db_min("CAI", "DONE3"))
 
     def test_done3_cheaper_than_done4(self, estimator, done3_itinerary, v3_itinerary):
         """DONE3 base fare should be less than DONE4."""

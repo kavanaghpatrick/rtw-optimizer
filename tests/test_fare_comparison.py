@@ -2,6 +2,8 @@
 
 import datetime
 import json
+import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -23,6 +25,24 @@ from rtw.search.models import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_FARES_DB = Path(__file__).parent.parent / "rtw" / "data" / "fares.db"
+
+
+def _db_min(origin, fare_basis):
+    """Cheapest filed fare for an origin, read straight from fares.db."""
+    con = sqlite3.connect(_FARES_DB)
+    try:
+        return con.execute(
+            "SELECT MIN(fare_usd) FROM fares WHERE origin = ? AND fare_basis = ?",
+            [origin, fare_basis],
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+
+# RTW fare used by the default query (ex-SYD DONE4)
+SYD_DONE4 = _db_min("SYD", "DONE4")
 
 def _make_query(origin="SYD", ticket_type="DONE4"):
     return SearchQuery(
@@ -81,47 +101,39 @@ def _make_candidate(segments_spec, direction=Direction.EASTBOUND):
 # ---------------------------------------------------------------------------
 
 class TestFareLookup:
-    def test_fare_lookup_known_origin_done4(self):
+    @pytest.mark.parametrize(
+        "origin,basis",
+        [("SYD", "DONE4"), ("CAI", "DONE3"), ("JFK", "DONE6"), ("OSL", "LONE4"),
+         ("BOM", "DONE4")],
+    )
+    def test_fare_lookup_matches_db(self, origin, basis):
         e = CostEstimator()
-        assert e.get_base_fare("SYD", TicketType.DONE4) == 8800.0
-
-    def test_fare_lookup_known_origin_done3(self):
-        e = CostEstimator()
-        assert e.get_base_fare("CAI", TicketType.DONE3) == 3500.0
-
-    def test_fare_lookup_high_fare(self):
-        e = CostEstimator()
-        assert e.get_base_fare("JFK", TicketType.DONE6) == 14099.0
-
-    def test_fare_lookup_economy(self):
-        e = CostEstimator()
-        assert e.get_base_fare("OSL", TicketType.LONE4) == 3000.0
+        assert e.get_base_fare(origin, TicketType(basis)) == pytest.approx(
+            _db_min(origin, basis)
+        )
 
     def test_fare_lookup_unknown_origin(self):
         e = CostEstimator()
-        assert e.get_base_fare("BOM", TicketType.DONE4) == 0.0
+        assert _db_min("GLA", "DONE4") is None
+        assert e.get_base_fare("GLA", TicketType.DONE4) == 0.0
 
     def test_fare_lookup_aone4_exists(self):
         e = CostEstimator()
-        # AONE4 now exists in fares.yaml
-        result = e.get_base_fare("SYD", TicketType("AONE4"))
-        assert result > 0
+        assert e.get_base_fare("SYD", TicketType("AONE4")) == pytest.approx(
+            _db_min("SYD", "AONE4")
+        )
 
     def test_fare_lookup_case_insensitive(self):
         e = CostEstimator()
         # get_base_fare uppercases the origin
-        assert e.get_base_fare("syd", TicketType.DONE4) == 8800.0
+        assert e.get_base_fare("syd", TicketType.DONE4) == pytest.approx(SYD_DONE4)
 
-    def test_all_origins_have_done_and_lone_types(self):
+    def test_all_compared_origins_return_float(self):
         e = CostEstimator()
-        import yaml
-        from pathlib import Path
-        with open(Path(__file__).parent.parent / "rtw" / "data" / "fares.yaml") as f:
-            fares = yaml.safe_load(f)
-        for origin in fares.get("origins", {}):
+        for row in e.compare_origins(TicketType.DONE4)[:25]:
             for tt in ["DONE3", "DONE4", "DONE5", "DONE6", "LONE3", "LONE4", "LONE5", "LONE6"]:
-                fare = e.get_base_fare(origin, TicketType(tt))
-                assert isinstance(fare, float), f"{origin}/{tt} should return float"
+                fare = e.get_base_fare(row["origin"], TicketType(tt))
+                assert isinstance(fare, float), f"{row['origin']}/{tt} should return float"
 
 
 # ---------------------------------------------------------------------------
@@ -202,20 +214,21 @@ class TestSegmentAggregation:
 
 class TestValueCalculation:
     def test_value_positive_savings(self):
-        # RTW $8,800, individual $22,000 -> savings $13,200, multiplier 2.5x
+        # Individual tickets = 2.5x the RTW fare -> savings 1.5x fare, multiplier 2.5x
+        price = SYD_DONE4 * 2.5 / 4
         spec = [
-            ("SYD", "HKG", "CX", 5500.0, False),
-            ("HKG", "LHR", "CX", 5500.0, False),
-            ("LHR", "JFK", "BA", 5500.0, False),
-            ("JFK", "SYD", "QF", 5500.0, False),
+            ("SYD", "HKG", "CX", price, False),
+            ("HKG", "LHR", "CX", price, False),
+            ("LHR", "JFK", "BA", price, False),
+            ("JFK", "SYD", "QF", price, False),
         ]
         cand = _make_candidate(spec)
         fc = compute_fare_comparison(cand, _make_query())
-        assert fc.savings_usd == 13200.0
+        assert fc.savings_usd == pytest.approx(SYD_DONE4 * 1.5, abs=0.01)
         assert fc.value_multiplier == 2.5
 
     def test_value_negative_savings(self):
-        # RTW $8,800, individual $5,000 -> savings -$3,800
+        # Individual tickets = $5,000 total, below the RTW fare -> negative savings
         spec = [
             ("SYD", "HKG", "CX", 1250.0, False),
             ("HKG", "LHR", "CX", 1250.0, False),
@@ -224,26 +237,27 @@ class TestValueCalculation:
         ]
         cand = _make_candidate(spec)
         fc = compute_fare_comparison(cand, _make_query())
-        assert fc.savings_usd == -3800.0
-        assert fc.value_multiplier == 0.57
+        assert fc.savings_usd == pytest.approx(5000.0 - SYD_DONE4, abs=0.01)
+        assert fc.value_multiplier == round(5000.0 / SYD_DONE4, 2)
 
     def test_value_breakeven(self):
-        # RTW $8,800, individual $8,800 -> savings $0, multiplier 1.0x
+        # Individual tickets = RTW fare -> savings $0, multiplier 1.0x
+        price = SYD_DONE4 / 4
         spec = [
-            ("SYD", "HKG", "CX", 2200.0, False),
-            ("HKG", "LHR", "CX", 2200.0, False),
-            ("LHR", "JFK", "BA", 2200.0, False),
-            ("JFK", "SYD", "QF", 2200.0, False),
+            ("SYD", "HKG", "CX", price, False),
+            ("HKG", "LHR", "CX", price, False),
+            ("LHR", "JFK", "BA", price, False),
+            ("JFK", "SYD", "QF", price, False),
         ]
         cand = _make_candidate(spec)
         fc = compute_fare_comparison(cand, _make_query())
-        assert fc.savings_usd == 0.0
+        assert fc.savings_usd == pytest.approx(0.0, abs=0.01)
         assert fc.value_multiplier == 1.0
 
     def test_value_rtw_fare_zero(self):
         spec = [("SYD", "HKG", "CX", 5000.0, False)]
         cand = _make_candidate(spec)
-        query = _make_query(origin="BOM")  # BOM not in fares.yaml
+        query = _make_query(origin="GLA")  # GLA files no RTW fare in fares.db
         fc = compute_fare_comparison(cand, query)
         assert fc.base_fare_usd == 0.0
         assert fc.value_multiplier == 0.0  # no division by zero
@@ -272,12 +286,13 @@ class TestValueCalculation:
         assert fc.segments_total == 5
 
     def test_value_large_multiplier(self):
-        # CAI $3,500 vs $35,000 -> multiplier 10.0x
+        # Individual tickets = 10x the filed CAI DONE3 fare -> multiplier 10.0x
+        price = _db_min("CAI", "DONE3") * 10 / 4
         spec = [
-            ("CAI", "HKG", "QR", 10000.0, False),
-            ("HKG", "SYD", "CX", 10000.0, False),
-            ("SYD", "LAX", "QF", 10000.0, False),
-            ("LAX", "CAI", "BA", 5000.0, False),
+            ("CAI", "HKG", "QR", price, False),
+            ("HKG", "SYD", "CX", price, False),
+            ("SYD", "LAX", "QF", price, False),
+            ("LAX", "CAI", "BA", price, False),
         ]
         cand = _make_candidate(spec)
         query = _make_query(origin="CAI", ticket_type="DONE3")
@@ -328,7 +343,7 @@ class TestPlainOutput:
         from rtw.output.search_formatter import format_search_results_plain
         result = _make_result_with_fare()
         output = format_search_results_plain(result)
-        assert "$8,800" in output
+        assert f"${SYD_DONE4:,.0f}" in output
 
     def test_plain_contains_savings(self):
         from rtw.output.search_formatter import format_search_results_plain
@@ -385,7 +400,7 @@ class TestJsonOutput:
         result = _make_result_with_fare()
         data = json.loads(format_search_json(result))
         fc = data["options"][0]["fare_comparison"]
-        assert fc["rtw_base_fare_usd"] == 8800.0
+        assert fc["rtw_base_fare_usd"] == pytest.approx(SYD_DONE4)
         assert isinstance(fc["segment_total_usd"], float)
         assert isinstance(fc["segments_priced"], int)
         assert fc["verdict"] in ("excellent", "great", "good", "fair", "poor")
@@ -415,12 +430,12 @@ class TestYamlExport:
         opt = result.options[0]
         output = export_itinerary(opt, result.query)
         assert "# RTW Fare:" in output
-        assert "$8,800" in output
+        assert f"${SYD_DONE4:,.0f}" in output
 
     def test_yaml_no_fare_header_when_unavailable(self):
         from rtw.search.exporter import export_itinerary
-        query = _make_query(origin="BOM")
-        cand = _make_candidate([("BOM", "HKG", "CX", None, False)])
+        query = _make_query(origin="GLA")  # GLA files no RTW fare in fares.db
+        cand = _make_candidate([("GLA", "HKG", "CX", None, False)])
         cand.fare_comparison = compute_fare_comparison(cand, query)
         output = export_itinerary(cand, query)
         assert "# RTW Fare:" not in output
