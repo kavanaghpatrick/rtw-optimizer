@@ -223,6 +223,8 @@ distance_based:
     # Oman Air (15th oneworld member, 1 Jul 2025). All business buckets
     # (I/P/J/C/D) earn a flat 12.5% for tier points — there is no 6% band;
     # only First (F/A) earns 25%. Verified vs Head for Points (Feb 2026).
+    A: 25
+    F: 25
     D: 12.5
     J: 12.5
     C: 12.5
@@ -240,11 +242,40 @@ distance_based:
     V: 2
 
 # BA bonus NTP (per segment, BA-marketed flights only)
-# Permanent from 25 Nov 2025
+# Permanent from 25 Nov 2025. From 1 Apr 2026 BA tiers the bonus by fare type;
+# these are the lowest (non-flex) tier, per BA's tier-point-bonus offer page
+# (britishairways.com/content/the-british-airways-club/offers/tier-point-bonus)
+# and pointscrowd.com's screenshot of it: long-haul business 500, first 650.
+# Flexible fare types earn more. A further change is announced for 1 Apr 2027.
 ba_bonus:
   euro_traveller: 75       # Short-haul economy
-  club_europe: 175         # Short-haul business
+  club_europe: 175         # Short-haul business (and short-haul First, per BA terms)
   world_traveller: 150     # Long-haul economy
   world_traveller_plus: 275  # Premium economy
-  club_world: 400          # Long-haul business
-  first: 550               # First class
+  club_world: 500          # Long-haul business (was 400 before 1 Apr 2026)
+  first: 650               # Long-haul first (was 550 before 1 Apr 2026)
+
+# BA bonus haul definition, from the same BA offer terms: "Short-haul" means
+# flights up to 3,000 miles, or up to 2,000 miles on BA-operated flights, or
+# the listed routes (city codes). "Long-haul" is everything else.
+ba_bonus_haul:
+  short_haul_max_miles_ba_operated: 2000
+  short_haul_max_miles_other: 3000
+  short_haul_routes:
+    - LAS-MIA
+    - LAS-NYC
+    - LAS-PHL
+    - LAS-WAS
+    - LAX-BOS
+    - LAX-CLT
+    - LAX-MCO
+    - LAX-MIA
+    - LAX-NYC
+    - LAX-PHL
+    - LAX-RDU
+    - LAX-WAS
+    - LON-AMM
+  city_airports:
+    LON: [LHR, LGW, LCY, STN, LTN, SEN]
+    NYC: [JFK, LGA, EWR]
+    WAS: [IAD, DCA, BWI]

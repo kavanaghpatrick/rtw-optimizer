@@ -11,11 +11,11 @@ def calc():
     return NTPCalculator()
 
 
-def _make_itinerary(segments, origin="CAI", ticket_type="DONE4"):
+def _make_itinerary(segments, origin="CAI", ticket_type="DONE4", cabin="business"):
     """Build a minimal Itinerary for testing."""
     return Itinerary.model_validate(
         {
-            "ticket": {"type": ticket_type, "cabin": "business", "origin": origin},
+            "ticket": {"type": ticket_type, "cabin": cabin, "origin": origin},
             "segments": segments,
         }
     )
@@ -146,6 +146,155 @@ class TestPerSegmentBookingClass:
         assert results[1].rate == 15
 
 
+class TestTicketCabinClass:
+    """With no class given (as every CLI caller does), earning follows the
+    ticket cabin: LONE books L, AONE books A, DONE books D."""
+
+    def test_lone_qr_earns_economy_rate(self, calc):
+        """Regression: LONE4 QR LHR-DOH earned 50% (1,629 NTP); L is 7% (~228)."""
+        itin = _make_itinerary(
+            [{"from": "LHR", "to": "DOH", "carrier": "QR"}],
+            origin="LHR", ticket_type="LONE4", cabin="economy",
+        )
+        est = calc.calculate(itin)[0]
+        assert est.rate == 7
+        assert est.estimated_ntp == pytest.approx(228, abs=5)
+
+    def test_aone_qr_earns_first_rate(self, calc):
+        """AONE4 QR earns at A (40%), not D (50%)."""
+        itin = _make_itinerary(
+            [{"from": "LHR", "to": "DOH", "carrier": "QR"}],
+            origin="LHR", ticket_type="AONE4", cabin="first",
+        )
+        est = calc.calculate(itin)[0]
+        assert est.rate == 40
+        assert est.confidence == "calculated"
+
+    def test_done_qr_still_earns_d_rate(self, calc):
+        itin = _make_itinerary([{"from": "LHR", "to": "DOH", "carrier": "QR"}], origin="LHR")
+        assert calc.calculate(itin)[0].rate == 50
+
+    def test_aone_on_fj_books_d_and_earns_d_rate(self, calc):
+        """Rule 3015 §5(b): AONE on FJ books D, so it earns the D rate (25%)
+        exactly, rather than an estimate from a non-existent A booking."""
+        itin = _make_itinerary(
+            [{"from": "NAN", "to": "SFO", "carrier": "FJ"}],
+            origin="LHR", ticket_type="AONE4", cabin="first",
+        )
+        est = calc.calculate(itin)[0]
+        assert est.rate == 25
+        assert est.estimated_ntp > 0
+        assert est.confidence == "calculated"
+
+    def test_aone_wy_first_rate(self, calc):
+        """WY First (A) earns 25%, double its flat 12.5% business rate."""
+        itin = _make_itinerary(
+            [{"from": "MCT", "to": "LHR", "carrier": "WY"}],
+            origin="LHR", ticket_type="AONE4", cabin="first",
+        )
+        assert calc.calculate(itin)[0].rate == 25
+
+    def test_segment_class_beats_ticket_cabin(self, calc):
+        itin = _make_itinerary(
+            [{"from": "LHR", "to": "DOH", "carrier": "QR", "booking_class": "B"}],
+            origin="LHR", ticket_type="LONE4", cabin="economy",
+        )
+        assert calc.calculate(itin)[0].rate == 15
+
+
+class TestSpendBased:
+    """BA/AA/IB spend pool includes YQ; BA bonus keyed on cabin and haul."""
+
+    def _ba(self, calc, to, ticket_type="DONE4", cabin="business", **seg):
+        itin = _make_itinerary(
+            [{"from": "LHR", "to": to, "carrier": "BA", **seg}],
+            origin="LHR", ticket_type=ticket_type, cabin=cabin,
+        )
+        return calc.calculate(itin, total_fare_usd=5000)[0]
+
+    def test_spend_pool_includes_yq(self, calc):
+        """BA YQ (~$321/segment in carriers.yaml) is added to the fare before proration."""
+        est = self._ba(calc, "JFK")
+        assert "$5321 of fare + YQ allocated" in est.notes
+
+    def test_short_haul_business_gets_club_europe(self, calc):
+        """Regression: LHR-MAD BA DONE4 got '+400 Club World'; it is Club Europe 175."""
+        est = self._ba(calc, "MAD")
+        assert "+175 BA Club Europe bonus" in est.notes
+        assert "Club World" not in est.notes
+
+    def test_long_haul_business_gets_club_world(self, calc):
+        assert "+500 BA Club World bonus" in self._ba(calc, "JFK").notes
+
+    def test_economy_bonuses(self, calc):
+        short = self._ba(calc, "MAD", ticket_type="LONE4", cabin="economy")
+        long_ = self._ba(calc, "JFK", ticket_type="LONE4", cabin="economy")
+        assert "+75 BA Euro Traveller bonus" in short.notes
+        assert "+150 BA World Traveller bonus" in long_.notes
+
+    def test_first_bonuses(self, calc):
+        """Long-haul First earns the First bonus; BA terms treat short-haul First
+        as Club Europe."""
+        assert "+650 BA First bonus" in self._ba(
+            calc, "JFK", ticket_type="AONE4", cabin="first").notes
+        assert "+175 BA Club Europe bonus" in self._ba(
+            calc, "MAD", ticket_type="AONE4", cabin="first").notes
+
+    def test_lon_amm_listed_short_haul(self, calc):
+        """LON-AMM is on BA's short-haul route list despite >2,000 miles."""
+        assert "Club Europe" in self._ba(calc, "AMM").notes
+
+    def test_ba_operated_2000_mile_cutoff(self, calc):
+        """LHR-TLV (~2,220 mi) is long-haul when BA-operated, short-haul when
+        BA-marketed on another operator (3,000-mile limit)."""
+        assert "Club World" in self._ba(calc, "TLV").notes
+        assert "Club Europe" in self._ba(calc, "TLV", operating_carrier="IB").notes
+
+    def test_no_bonus_on_aa_or_ib(self, calc):
+        itin = _make_itinerary(
+            [{"from": "MAD", "to": "LHR", "carrier": "IB"},
+             {"from": "LHR", "to": "JFK", "carrier": "AA"}],
+            origin="MAD",
+        )
+        for est in calc.calculate(itin, total_fare_usd=5000):
+            assert "bonus" not in est.notes
+
+    def test_flight_prefix_decides_marketing_carrier(self, calc):
+        """Regression: carrier CX with flight BA7001 earned CX 25% distance; the
+        coupon is BA-marketed, so it earns spend-based, with a warning."""
+        itin = _make_itinerary(
+            [{"from": "HKG", "to": "LHR", "carrier": "CX", "flight": "BA7001"}],
+            origin="LHR",
+        )
+        est = calc.calculate(itin, total_fare_usd=5000)[0]
+        assert est.method == NTPMethod.REVENUE
+        assert "earning follows the flight number (BA)" in est.notes
+
+    def test_ay_codeshare_range_matches_codeshare_module(self, calc):
+        """Regression: NTP gave AY5449 50% distance while codeshare.py said spend.
+        Both now agree, and the unverified-for-BA-Club caveat is shown."""
+        from rtw.codeshare import earning_band
+
+        itin = _make_itinerary(
+            [{"from": "SIN", "to": "HKG", "carrier": "AY", "flight": "AY5449"}],
+            origin="LHR",
+        )
+        est = calc.calculate(itin, total_fare_usd=5000)[0]
+        assert earning_band("AY", "AY5449").method == "spend"
+        assert est.method == NTPMethod.REVENUE
+        assert "unverified for BA Club" in est.notes
+        assert "bonus" not in est.notes
+
+    def test_ay_own_flight_still_distance(self, calc):
+        itin = _make_itinerary(
+            [{"from": "HEL", "to": "LHR", "carrier": "AY", "flight": "AY1331"}],
+            origin="LHR",
+        )
+        est = calc.calculate(itin)[0]
+        assert est.method == NTPMethod.DISTANCE
+        assert est.rate == 50
+
+
 class TestEarningNotes:
     """Plain-language earning explanations on distance segments."""
 
@@ -232,7 +381,7 @@ class TestRevenueBased:
         assert est.estimated_ntp > 0
 
     def test_ba_segment_gets_bonus(self, calc):
-        """BA segments should get Club World bonus (+400 NTP)."""
+        """BA long-haul business gets the Club World bonus (+500 NTP from Apr 2026)."""
         itin = _make_itinerary(
             [
                 {"from": "LHR", "to": "JFK", "carrier": "BA"},
@@ -242,9 +391,8 @@ class TestRevenueBased:
         results = calc.calculate(itin, booking_class="D", total_fare_usd=5000)
         est = results[0]
         assert est.method == NTPMethod.REVENUE
-        # Should include the 400 bonus on top of the fare-based NTP
-        assert est.estimated_ntp >= 400
-        assert "bonus" in est.notes.lower()
+        assert est.estimated_ntp >= 500
+        assert "+500 BA Club World bonus" in est.notes
 
     def test_ib_segment_is_revenue_based(self, calc):
         """IB segments should use revenue method."""
@@ -354,10 +502,25 @@ class TestV3Itinerary:
 
 
 class TestDefaultFare:
-    """Fare lookup from fares.yaml."""
+    """Default fare comes from FareSource (cheapest filed fare in fares.db)."""
+
+    @staticmethod
+    def _db_min(origin, fare_basis):
+        import sqlite3
+        from pathlib import Path
+
+        db = Path(__file__).parent.parent / "rtw" / "data" / "fares.db"
+        con = sqlite3.connect(db)
+        try:
+            return con.execute(
+                "SELECT MIN(fare_usd) FROM fares WHERE origin = ? AND fare_basis = ?",
+                [origin, fare_basis],
+            ).fetchone()[0]
+        finally:
+            con.close()
 
     def test_cai_done4_fare(self, calc):
-        """CAI DONE4 fare should be 4000."""
+        """CAI DONE4 default fare is the filed CAI DONE4 fare."""
         itin = _make_itinerary(
             [
                 {"from": "CAI", "to": "AMM", "carrier": "RJ"},
@@ -365,6 +528,60 @@ class TestDefaultFare:
             origin="CAI",
             ticket_type="DONE4",
         )
-        # Should use the default fare without error
+        assert calc._default_fare(itin) == pytest.approx(self._db_min("CAI", "DONE4"))
         results = calc.calculate(itin, booking_class="D")
         assert len(results) == 1
+
+    def test_lax_uses_lax_fare_not_cai(self, calc):
+        """Spend-based NTP ex-LAX allocates the filed LAX fare, not a Cairo substitute."""
+        itin = _make_itinerary(
+            [{"from": "LAX", "to": "JFK", "carrier": "AA"}],
+            origin="LAX",
+            ticket_type="DONE4",
+        )
+        lax_fare = self._db_min("LAX", "DONE4")
+        default = calc.calculate(itin, booking_class="D")
+        explicit = calc.calculate(itin, booking_class="D", total_fare_usd=lax_fare)
+        assert default[0].method == NTPMethod.REVENUE
+        assert default[0].estimated_ntp == pytest.approx(explicit[0].estimated_ntp)
+        # AA US-domestic carries no YQ, so the spend pool is just the LAX fare.
+        assert f"${lax_fare:.0f} of fare + YQ allocated" in default[0].notes
+
+    def test_unfiled_origin_labelled_fare_unknown(self, calc):
+        """No filed fare: spend-based segments say 'fare unknown' instead of guessing."""
+        itin = _make_itinerary(
+            [
+                {"from": "GLA", "to": "LHR", "carrier": "BA"},
+                {"from": "LHR", "to": "DOH", "carrier": "QR"},
+            ],
+            origin="GLA",
+            ticket_type="DONE4",
+        )
+        assert self._db_min("GLA", "DONE4") is None
+        assert calc._default_fare(itin) is None
+        results = calc.calculate(itin, booking_class="D")
+        assert results[0].confidence == "fare unknown"
+        assert results[0].estimated_ntp == 0.0
+        assert "Fare unknown" in results[0].notes
+        # Distance-based segments do not need the fare and are still calculated
+        assert results[1].method == NTPMethod.DISTANCE
+        assert results[1].estimated_ntp > 0
+
+
+
+class TestJetstarOperated:
+    """QF codeshares operated by Jetstar: earning unconfirmed, so flagged."""
+
+    def test_qf_operated_by_jq_flagged(self, calc):
+        itin = _make_itinerary(
+            [{"from": "SYD", "to": "MEL", "carrier": "QF", "operating_carrier": "JQ"}],
+            origin="SYD",
+        )
+        est = calc.calculate(itin)[0]
+        assert "Jetstar" in est.notes
+        assert "not confirmed" in est.notes
+
+    def test_qf_own_flight_not_flagged(self, calc):
+        itin = _make_itinerary([{"from": "SYD", "to": "MEL", "carrier": "QF"}], origin="SYD")
+        est = calc.calculate(itin)[0]
+        assert "Jetstar" not in (est.notes or "")
