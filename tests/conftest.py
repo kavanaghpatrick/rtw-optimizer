@@ -26,6 +26,12 @@ def v3_itinerary(load_yaml):
 
 
 @pytest.fixture
+def v3_same_city_itinerary(load_yaml):
+    """Original V3 with NRT->HND and TSA->TPE airport changes (18 segments, invalid)."""
+    return load_yaml("v3_same_city_gaps.yaml")
+
+
+@pytest.fixture
 def qr_first_itinerary(load_yaml):
     """Load the invalid QR-first routing."""
     return load_yaml("invalid_qr_first.yaml")

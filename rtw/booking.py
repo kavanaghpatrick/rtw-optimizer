@@ -73,33 +73,45 @@ class BookingGenerator:
 
     # --- Booking class logic (T031) ---
 
-    def _get_booking_class(self, carrier: Optional[str], cabin: CabinClass) -> Optional[str]:
+    def _get_booking_class(
+        self,
+        carrier: Optional[str],
+        cabin: CabinClass,
+        from_airport: Optional[str] = None,
+        to_airport: Optional[str] = None,
+    ) -> Optional[str]:
         """Determine the booking class for a carrier/cabin combination.
 
-        Delegates to shared utility in rtw.carriers. Returns None for
-        surface segments (carrier=None).
+        Delegates to shared utility in rtw.carriers. The airports let
+        carriers with a domestic row (AY, NU) resolve correctly. Returns
+        None for surface segments (carrier=None).
         """
         if carrier is None:
             return None
 
         from rtw.carriers import get_booking_class
 
-        return get_booking_class(carrier, cabin)
+        return get_booking_class(carrier, cabin, from_airport, to_airport)
 
     def _get_fallback_class(
-        self, carrier: Optional[str], cabin: CabinClass
+        self,
+        carrier: Optional[str],
+        cabin: CabinClass,
+        from_airport: Optional[str] = None,
+        to_airport: Optional[str] = None,
     ) -> Optional[str]:
-        """Determine the fallback booking class (H on AA, B otherwise).
+        """Determine the fallback booking class (business: H on AA, B
+        otherwise; first: Y).
 
         Delegates to shared utility in rtw.carriers. Returns None when no
-        fallback applies (surface segment or non-business cabin).
+        fallback applies (surface segment or economy cabin).
         """
         if carrier is None:
             return None
 
         from rtw.carriers import get_fallback_class
 
-        return get_fallback_class(carrier, cabin)
+        return get_fallback_class(carrier, cabin, from_airport, to_airport)
 
     def _is_same_city(self, airport1: str, airport2: str) -> bool:
         """Check if two airports are in the same city group."""
@@ -125,6 +137,21 @@ class BookingGenerator:
         num_continents = t.num_continents
         departure = t.departure.strftime("%d %B %Y") if t.departure else "TBD"
         num_segments = len(itinerary.flown_segments)
+        num_surface = len(itinerary.surface_segments)
+        # Same-city airport changes (NRT -> HND) are unlisted surface sectors
+        # that still use a segment (Rule 3015 §4).
+        num_airport_changes = sum(
+            1
+            for prev, nxt in zip(itinerary.segments, itinerary.segments[1:])
+            if prev.to_airport != nxt.from_airport
+            and self._is_same_city(prev.to_airport, nxt.from_airport)
+        )
+        surface_line = f"{num_segments} flown + {num_surface} surface"
+        if num_airport_changes:
+            surface_line += (
+                f" + {num_airport_changes} airport-change surface"
+                f" = {num_segments + num_surface + num_airport_changes} total"
+            )
 
         lines = [
             "Hello, I'd like to book a oneworld Explorer Round-the-World ticket.",
@@ -134,7 +161,7 @@ class BookingGenerator:
             f"  Origin:       {origin}",
             f"  Departure:    {departure}",
             f"  Plating:      {plating}",
-            f"  Segments:     {num_segments} flown + {len(itinerary.surface_segments)} surface",
+            f"  Segments:     {surface_line}",
             "",
             "I'll give you the segments one at a time. Please book each segment",
             "before we move to the next one.",
@@ -149,8 +176,12 @@ class BookingGenerator:
 
         for i, seg in enumerate(segments):
             warnings: list[str] = []
-            booking_class = self._get_booking_class(seg.carrier, cabin)
-            fallback_class = self._get_fallback_class(seg.carrier, cabin)
+            booking_class = self._get_booking_class(
+                seg.carrier, cabin, seg.from_airport, seg.to_airport
+            )
+            fallback_class = self._get_fallback_class(
+                seg.carrier, cabin, seg.from_airport, seg.to_airport
+            )
             route = f"{seg.from_airport}-{seg.to_airport}"
 
             # --- Same-city transition warning ---
@@ -164,7 +195,9 @@ class BookingGenerator:
                     city = self._get_city_group_name(seg.from_airport)
                     warnings.append(
                         f"Same-city transition: {prev.to_airport} -> {seg.from_airport} "
-                        f"({city}). Passenger must transfer between airports."
+                        f"({city}). Passenger must transfer between airports. "
+                        f"This airport change is a surface sector and uses one of "
+                        f"the 16 segments (Rule 3015 §4)."
                     )
 
             # --- Surface segment ---
@@ -194,10 +227,13 @@ class BookingGenerator:
             fj_atr_note = ""
             if seg.carrier == "FJ" and booking_class == "D":
                 # Check notes for ATR-72 indicator
+                # Rule 3015 §5(b): no business cabin -> book the lower
+                # (economy) cabin's code L, then B; never Y.
                 if seg.notes and "ATR" in seg.notes.upper():
                     fj_atr_note = (
-                        " (Note: ATR-72 is single class — D maps to Y. "
-                        "Confirm Y class availability.)"
+                        " (Note: ATR-72 is a single-class aircraft: book L; "
+                        "if L is unavailable, book B; no refund for the "
+                        "downgrade.)"
                     )
 
             # --- Married segment warning (short connection) ---
@@ -287,9 +323,23 @@ class BookingGenerator:
             date_str = seg.date.strftime("%d %b %Y") if seg.date else "date TBD"
             flight_info = f" flight {seg.flight}" if seg.flight else ""
 
+            # Rule 3015 §5(b) NOTE: when the cabin's code is unavailable, book
+            # the lower cabin's own code first, and only then the last-resort
+            # class (B, or H on AA, for DONE*; Y for First). Display text only:
+            # fallback_class stays the last-resort class the verify scanner uses.
             class_line = f"  Booking class: {booking_class}"
             if fallback_class:
-                class_line += f" (fallback: {fallback_class} if {booking_class} sold out)"
+                if cabin == CabinClass.FIRST:
+                    class_line += (
+                        f" (if {booking_class} unavailable: the lower-cabin code"
+                        f" (D or I), then {fallback_class}; no refund for the"
+                        f" downgrade; Rule 3015 §5(b))"
+                    )
+                else:
+                    class_line += (
+                        f" (if {booking_class} unavailable: L, economy cabin;"
+                        f" then {fallback_class}; no refund for the downgrade; Rule 3015 §5(b))"
+                    )
 
             instruction = (
                 f"Segment {i + 1}: {seg.carrier}{flight_info} — {route} — {date_str}\n"
@@ -331,11 +381,13 @@ class BookingGenerator:
             f"  4. Request fare quote — ticket type {t.type.value}",
             "  5. Verify total matches expected fare + YQ surcharges",
             "  6. Ask about change/cancellation flexibility",
+            "  7. Ask the agent to insert OSI YY OW RTW in the PNR (Rule 3015 §5(a));"
+            " without it the reservation may be auto-cancelled.",
         ]
 
         if t.departure:
             lines.append(
-                f"  7. Confirm first segment date lock: {t.departure.strftime('%d %b %Y')}"
+                f"  8. Confirm first segment date lock: {t.departure.strftime('%d %b %Y')}"
             )
             lines.append("     (First segment date is fixed; other dates can change)")
 
@@ -361,15 +413,19 @@ class BookingGenerator:
         """1-based PNR line number of the first flown (non-surface) segment.
 
         The RTW global indicator attaches to the first flight sector
-        (``/S{N}RW``); the Qantas oneworld clue card notes verbatim that
-        "'2' refers to the 1st flight sector in the itinerary". Surface
-        sectors occupy a PNR line (ARNK) and therefore count in the
-        numbering, so a leading surface sector shifts N to 2.
+        (``/S{N}RW``); the Qantas oneworld clue card shows ``FXP/S2RW`` and
+        notes verbatim that "'2' refers to the 1st flight sector in the
+        itinerary". Amadeus numbers passenger-name elements before the
+        itinerary, so one passenger puts the first segment on line 2 and two
+        passengers on line 3. Surface sectors occupy a PNR line (ARNK) and
+        also count. Infants without a seat travel on an adult's name line and
+        do not get their own; ``ticket.passengers`` counts seated travellers.
         """
+        pax = itinerary.ticket.passengers
         for i, seg in enumerate(itinerary.segments):
             if not seg.is_surface:
-                return i + 1
-        return 1
+                return pax + i + 1
+        return pax + 1
 
     def _gds_commands(self, itinerary: Itinerary) -> list[str]:
         """Amadeus cryptic entries that identify and price the itinerary as a
@@ -438,15 +494,17 @@ class BookingGenerator:
         first_flown = self._first_flown_line(itinerary)
         all_warnings.append(
             f"FXP/S{first_flown}RW: 'S{first_flown}' targets the first flown "
-            f"segment's line in the built PNR (surface/ARNK lines count). "
-            f"Verify against the live PNR before pricing."
+            f"segment's line in the built PNR (passenger-name lines and "
+            f"surface/ARNK lines count). Verify against the live PNR before "
+            f"pricing."
         )
         all_warnings.append(
             "GDS list shows only the first-party-verified RTW entries (FQD fare "
-            "display + FXP RTW pricing). Segment sells and PNR-build entries "
-            "(SS/ARNK/OSI/FV) are given per-segment in the phone script above and "
-            "omitted from the cryptic list pending live-terminal confirmation "
-            "(docs/kb-owe-rtw-gds-firstparty.md)."
+            "display + FXP RTW pricing). Segment sells (SS/ARNK) are given "
+            "per-segment in the phone script above; the OSI YY OW RTW element "
+            "(Rule 3015 §5(a)) is a closing-checklist item for the agent to "
+            "insert. The validating-carrier element (FV) is omitted pending "
+            "live-terminal confirmation (docs/kb-owe-rtw-gds-firstparty.md)."
         )
 
         return BookingScript(

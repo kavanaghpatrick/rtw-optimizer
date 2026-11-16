@@ -431,6 +431,138 @@ def analyze(
 
 
 @app.command()
+def codeshare(
+    origin: str = typer.Argument(help="3-letter IATA origin"),
+    dest: str = typer.Argument(help="3-letter IATA destination"),
+    date: str = typer.Argument(help="Flight date YYYY-MM-DD"),
+    current: Optional[str] = typer.Option(
+        None, "--current", "-c", help="Currently-ticketed marketing carrier (e.g. CX)"
+    ),
+    booking_class: str = typer.Option("D", "--class", help="Booking class (default D)"),
+    rows_json: Optional[str] = typer.Option(
+        None, "--rows", help="JSON list of codeshare rows to analyze instead of querying "
+        "ExpertFlyer (e.g. from the GDS): "
+        '[{"marketing_carrier":"QR","marketing_flight":"QR6969","d_seats":4}, ...]'
+    ),
+    json: JsonFlag = False,
+    verbose: VerboseFlag = False,
+    quiet: QuietFlag = False,
+) -> None:
+    """Find higher-earning codeshares for a leg (BA-Club tier points).
+
+    Enumerates every marketing flight number selling the route (via ExpertFlyer,
+    codeshares shown), maps each to its tier-point band, and flags the best
+    bookable swap. Earning follows the MARKETING carrier -- but an OWE fare may
+    not permit re-marketing a coupon; confirm with the ticketing agent.
+    """
+    _setup_logging(verbose, quiet)
+    import datetime as _dt
+    import json as _json
+
+    from rtw.codeshare import analyze_codeshares, build_options
+    from rtw.distance import DistanceCalculator
+
+    try:
+        d = _dt.date.fromisoformat(date)
+    except ValueError as exc:
+        raise typer.BadParameter(f"Invalid date '{date}' (use YYYY-MM-DD)") from exc
+
+    origin, dest = origin.upper(), dest.upper()
+    bc = booking_class.upper()
+    distance = DistanceCalculator().miles(origin, dest) or None
+
+    # Source the codeshare rows: injected JSON (GDS/testing) or live ExpertFlyer.
+    rows: list[dict] = []
+    ef_error: Optional[str] = None
+    if rows_json:
+        try:
+            rows = _json.loads(rows_json)
+        except ValueError as exc:
+            raise typer.BadParameter(f"Invalid --rows JSON: {exc}") from exc
+    else:
+        try:
+            from rtw.scraper.expertflyer import ExpertFlyerScraper
+
+            with ExpertFlyerScraper() as scraper:
+                rows = scraper.enumerate_flights(origin, dest, d, bc)
+        except Exception as exc:  # noqa: BLE001 - login/scrape failure is non-fatal
+            ef_error = str(exc)
+
+    if not rows:
+        msg = (
+            f"No codeshare data for {origin}-{dest} on {date}. "
+            "ExpertFlyer credentials may be missing (run `rtw login expertflyer`), "
+            "the route/date has no results, or pass --rows with GDS data."
+        )
+        if ef_error:
+            msg += f"\n  ({ef_error})"
+        if json:
+            typer.echo(_json.dumps({"route": f"{origin}-{dest}", "options": [], "note": msg}))
+        else:
+            typer.echo(msg)
+        raise typer.Exit(code=2 if ef_error else 0)
+
+    options = build_options(rows, current_carrier=current)
+    analysis = analyze_codeshares(
+        options, distance_miles=distance, current_carrier=current,
+        route=f"{origin}-{dest}", booking_class=bc,
+    )
+
+    if json:
+        typer.echo(analysis.model_dump_json(indent=2))
+        return
+
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console()
+    title = f"Codeshares: {analysis.route} ({bc}-class)"
+    if analysis.distance_miles:
+        title += f" — {analysis.distance_miles:,.0f} mi"
+    table = Table(title=title, show_lines=False)
+    table.add_column("Mkt")
+    table.add_column("Flight")
+    table.add_column("Oper")
+    table.add_column("Depart")
+    table.add_column(f"{bc} seats", justify="right")
+    table.add_column("Earning")
+    table.add_column("Est TP", justify="right")
+    for o in analysis.options:
+        mark = " *" if o.is_current else ""
+        if not o.eligible:
+            tp = "not permitted"
+        elif o.estimated_tp is not None:
+            tp = f"{o.estimated_tp:,.0f}"
+        elif o.earning.method == "spend":
+            tp = "spend"
+        else:
+            tp = "-"
+        seats = "?" if o.d_seats is None else str(o.d_seats)
+        style = "bold green" if o is analysis.best_bookable else None
+        table.add_row(
+            o.marketing_carrier + mark, o.marketing_flight or "-",
+            o.operating_carrier or "-", o.depart_time or "-", seats,
+            o.earning.label, tp, style=style,
+        )
+    console.print(table)
+
+    b = analysis.best_bookable
+    if b is not None and analysis.tp_gain and analysis.tp_gain > 0:
+        console.print(
+            f"\n[bold green]Best swap:[/bold green] ticket "
+            f"{b.marketing_carrier} {b.marketing_flight or ''} ({b.earning.label}) "
+            f"→ [bold]+{analysis.tp_gain:,.0f} TP[/bold] vs current."
+        )
+    elif analysis.current is not None and b is not None and b is analysis.current:
+        console.print("\n[dim]Current code is already the best-earning bookable option.[/dim]")
+
+    console.print("\n[yellow]Caveats:[/yellow]")
+    for c in analysis.caveats:
+        console.print(f"  - {c}")
+    console.print("  * = currently ticketed" if any(o.is_current for o in analysis.options) else "")
+
+
+@app.command()
 def continent(
     codes: list[str] = typer.Argument(help="Airport IATA codes to look up"),
     json: JsonFlag = False,
@@ -873,6 +1005,22 @@ def _scored_to_verify_option(
     return VerifyOption(option_id=option_id, segments=segments)
 
 
+def _cache_age_note(dclass) -> str:
+    """' (cached 3h ago)' for a cached availability result, else ''."""
+    import datetime
+
+    if dclass is None or not dclass.from_cache:
+        return ""
+    checked = dclass.checked_at
+    if checked.tzinfo is None:
+        checked = checked.replace(tzinfo=datetime.timezone.utc)
+    age = datetime.datetime.now(datetime.timezone.utc) - checked
+    minutes = max(0, int(age.total_seconds() // 60))
+    if minutes < 60:
+        return f" (cached {minutes}m ago)"
+    return f" (cached {minutes // 60}h ago)"
+
+
 def _display_verify_result(result: "VerifyResult", quiet: bool = False) -> None:
     """Display verification result in rich or plain format."""
     from rtw.verify.models import DClassStatus
@@ -931,9 +1079,11 @@ def _display_verify_result(result: "VerifyResult", quiet: bool = False) -> None:
             if seg.dclass.flights and seg.dclass.available_count <= 2:
                 tight = " [red bold]TIGHT[/red bold]"
 
+            age = _cache_age_note(seg.dclass)
             table.add_row(
                 str(seg.index + 1), route, carrier, date_str,
-                f"[{style}]{display}[/{style}]{tight}",
+                f"[{style}]{display}[/{style}]{tight}"
+                + (f"[dim]{age}[/dim]" if age else ""),
                 f"[{style}]{seats}[/{style}]",
             )
 
@@ -963,9 +1113,9 @@ def _display_verify_result(result: "VerifyResult", quiet: bool = False) -> None:
 
             # Fallback-class rescue row: primary D0 but fallback class bookable
             if (
-                status == DClassStatus.NOT_AVAILABLE
+                not seg.dclass.has_nonstop
                 and seg.fallback
-                and seg.fallback.status == DClassStatus.AVAILABLE
+                and seg.fallback.has_nonstop
             ):
                 fb = seg.fallback
                 table.add_row(
@@ -1033,7 +1183,8 @@ def _display_verify_result(result: "VerifyResult", quiet: bool = False) -> None:
                 tight = " TIGHT" if seg.dclass.flights and seg.dclass.available_count <= 2 else ""
                 typer.echo(
                     f"  {seg.index + 1}. {route} {seg.carrier or '??'}: "
-                    f"{seg.dclass.display_code} ({seg.dclass.seats} seats){tight}",
+                    f"{seg.dclass.display_code} ({seg.dclass.seats} seats){tight}"
+                    f"{_cache_age_note(seg.dclass)}",
                     err=True,
                 )
                 # Per-flight sub-rows
@@ -1050,9 +1201,9 @@ def _display_verify_result(result: "VerifyResult", quiet: bool = False) -> None:
                     if d0_count > 0:
                         typer.echo(f"       ({d0_count} more at D0)", err=True)
                 if (
-                    seg.dclass.status == DClassStatus.NOT_AVAILABLE
+                    not seg.dclass.has_nonstop
                     and seg.fallback
-                    and seg.fallback.status == DClassStatus.AVAILABLE
+                    and seg.fallback.has_nonstop
                 ):
                     fb = seg.fallback
                     typer.echo(
@@ -1394,6 +1545,7 @@ def search(
         ns_filter = None
         if nonstop:
             from rtw.nonstop.checker import NonstopChecker
+            from rtw.scraper.cache import ScrapeCache
             from rtw.scraper.serpapi_flights import serpapi_available
 
             if serpapi_available():
@@ -2124,6 +2276,9 @@ def scan_dates(
     best_ns_date = None
     best_ns_seats = 0
     nonstop_dates = 0
+    errored_dates = 0
+
+    from rtw.verify.models import DClassStatus
 
     for d in dates:
         try:
@@ -2131,6 +2286,12 @@ def scan_dates(
             if result is None:
                 _error_panel("ExpertFlyer login failed. Run: python3 -m rtw login expertflyer")
                 raise typer.Exit(code=2)
+
+            # A failed scrape is not a sold-out date: show ERR, don't count it.
+            if result.status in (DClassStatus.ERROR, DClassStatus.UNKNOWN):
+                errored_dates += 1
+                results.append((d, -1, 0, 0, 0, "ERR"))
+                continue
 
             ns_flights = result.nonstop_flights or []
             ns_seats = max((f.seats for f in ns_flights), default=0) if ns_flights else 0
@@ -2161,7 +2322,8 @@ def scan_dates(
             if "login" in str(exc).lower() or "session" in str(exc).lower():
                 _error_panel(f"ExpertFlyer session error: {exc}")
                 raise typer.Exit(code=2)
-            results.append((d, -1, 0, 0, 0, f"ERR"))
+            errored_dates += 1
+            results.append((d, -1, 0, 0, 0, "ERR"))
 
     scraper.close()
 
@@ -2203,11 +2365,16 @@ def scan_dates(
             typer.echo(f"  {d} ({d.strftime('%a')})  {booking_class}{total}  ns={ns}  {marker}  {fn}")
 
     # Summary
-    total_checked = len(dates)
+    total_checked = len(dates) - errored_dates
+    label = "checked dates" if errored_dates else "dates"
+    errored_note = f" ({errored_dates} errored)" if errored_dates else ""
     if nonstop_dates > 0:
-        typer.echo(f"\n{nonstop_dates}/{total_checked} dates have nonstop {booking_class}-class. Best: {best_ns_date} {booking_class}{best_ns_seats}")
+        typer.echo(
+            f"\n{nonstop_dates}/{total_checked} {label} have nonstop {booking_class}-class"
+            f"{errored_note}. Best: {best_ns_date} {booking_class}{best_ns_seats}"
+        )
     else:
-        typer.echo(f"\n0/{total_checked} dates have nonstop {booking_class}-class.")
+        typer.echo(f"\n0/{total_checked} {label} have nonstop {booking_class}-class{errored_note}.")
 
 
 # ---------------------------------------------------------------------------

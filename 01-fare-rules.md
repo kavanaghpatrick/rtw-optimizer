@@ -210,13 +210,38 @@ If both intercontinental flights are between Africa and the Europe Zone, then **
 
 ---
 
-## 13. Booking Classes for Business (DONE)
+## 13. Booking Classes (Rule 3015 §5(b))
 
-For DONE* Business Class fares:
-- Primary booking class: **D** (on most carriers)
-- Fallback: **B** class (except on American Airlines)
-- On American Airlines: **H** class
+### Booking Codes (oneworld Explorer Rule 3015, 27 FEB 2026 filing)
+| Carrier / flights | First (AONE*) | Business (DONE*) | Business (IONE3) | Economy (LONE*) |
+|-------------------|:---:|:---:|:---:|:---:|
+| AA BA CX MH QF QR | A | D | I | L |
+| AS AT FJ IB RJ UL | D | D | I | L |
+| AY International flights | D | D | I | L |
+| AY Domestic flights | Y | Y | Y | L |
+| JL International flights | A | D | I | L |
+| NU International flights | E | E | E | L |
+| JL NU Domestic Flights | A | D | I | L |
+| WY | A | D | I | L |
+
+Premium Economy (economy column): AA **P**; BA World Traveller Plus and IB Premium Economy **T**; CX QF **R**; JL NU **E**; RJ **W**.
+
+NOTE (verbatim): "For flights where First or Business Class is not offered or available, passengers may travel in a lower class, in the applicable booking code for that lower class. Where the applicable booking class for the lower class is not available, passengers travelling on First Class fares may book Y Class. Passengers travelling on DONE* Business Class fares may book B Class (except AA) or H Class on AA. The fare for the highest class used applies, without compensation."
+
+EXCEPTION (verbatim): "For services within the Middle East, where no Business Class is offered, Business Class passengers may book and travel in A Class on QR, subject to availability. This provision does not apply on any flight where Business Class exists but is unavailable for booking."
+
+Group booking codes (group travel section, ticketing carrier's group policy applies; all of AA/AS/AT/AY/BA/CX/FJ/IB/JL/MH/NU/QF/QR/RJ/UL/WY): Business **I**, Economy **G**.
+
+Summary for DONE* Business Class fares:
+- Primary booking class: **D** (every carrier except AY domestic = Y and NU international = E)
+- If D is not offered or not available: book the lower (economy) cabin's own code, **L**, first
+- If L is also unavailable: **B** class (except on American Airlines); on American Airlines: **H** class
 - The fare for the highest class used applies, without compensation for downgrade
+
+Summary for AONE* First Class fares:
+- Primary booking class: **A** on AA/BA/CX/MH/QF/QR/JL/WY; **D** on AS/AT/FJ/IB/RJ/UL and AY international; **Y** on AY domestic; **E** on NU international
+- If the First code is not offered or not available: book the lower cabin's own code (business **D**, or **I** where that applies)
+- If that is also unavailable: **Y** class on any carrier
 
 ### Key Carrier Booking Classes (Business)
 | Airline | Business Classes |

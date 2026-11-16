@@ -20,6 +20,12 @@ def v3(v3_itinerary):
     return Itinerary(**v3_itinerary)
 
 
+@pytest.fixture
+def v3_same_city(v3_same_city_itinerary):
+    """Original V3 with NRT->HND and TSA->TPE airport changes."""
+    return Itinerary(**v3_same_city_itinerary)
+
+
 # --- T031: Booking class logic ---
 
 
@@ -65,10 +71,26 @@ class TestBookingClass:
         assert generator._get_booking_class("QR", CabinClass.ECONOMY) == "L"
         assert generator._get_booking_class("BA", CabinClass.ECONOMY) == "L"
 
-    def test_first_is_a(self, generator):
-        """First class is A for all carriers."""
+    def test_first_is_a_on_a_carriers(self, generator):
+        """First class is A on AA/BA/CX/MH/QF/QR/JL/WY (Rule 3015 §5(b))."""
         assert generator._get_booking_class("AA", CabinClass.FIRST) == "A"
         assert generator._get_booking_class("QR", CabinClass.FIRST) == "A"
+
+    def test_first_is_d_on_ib_and_as(self, generator):
+        assert generator._get_booking_class("IB", CabinClass.FIRST) == "D"
+        assert generator._get_booking_class("AS", CabinClass.FIRST) == "D"
+
+    def test_first_script_uses_per_carrier_classes(self, generator):
+        """Each segment of a mixed-carrier AONE3 gets its own §5(b) First code."""
+        import yaml
+        from pathlib import Path
+
+        path = Path(__file__).parent / "fixtures" / "aone3_hel_first_booking_classes.yaml"
+        itin = Itinerary(**yaml.safe_load(path.read_text()))
+        scripts = generator._segment_scripts(itin)
+        assert [s.booking_class for s in scripts] == ["Y", "D", "D", "D", "A", "D"]
+        # First falls back to Y, except where the primary is already Y (AY domestic)
+        assert [s.fallback_class for s in scripts] == [None, "Y", "Y", "Y", "Y", "Y"]
 
     def test_surface_is_none(self, generator):
         """Surface segments (carrier=None) return None."""
@@ -132,15 +154,44 @@ class TestPhoneScript:
         for s in aa_scripts:
             assert s.booking_class == "D"
             assert s.fallback_class == "H"
-            assert "fallback: H" in s.phone_instruction
+            assert "then H" in s.phone_instruction
+
+    def test_business_downgrade_order_is_l_then_b(self, generator, v3):
+        """§5(b): D unavailable -> L (economy cabin code) first, then B / H on AA."""
+        scripts = generator._segment_scripts(v3)
+        qr = next(s for s in scripts if s.carrier == "QR")
+        line = qr.phone_instruction
+        assert "if D unavailable: L, economy cabin; then B" in line
+        assert "no refund" in line
+        assert "Rule 3015 §5(b)" in line
+        assert line.index("L, economy cabin") < line.index("then B")
+        aa = next(s for s in scripts if s.carrier == "AA")
+        assert "L, economy cabin; then H" in aa.phone_instruction
+
+    def test_first_downgrade_order_lists_lower_cabin_before_y(self, generator):
+        """§5(b): First code unavailable -> lower-cabin code, then Y."""
+        import yaml
+        from pathlib import Path
+
+        path = Path(__file__).parent / "fixtures" / "aone3_hel_first_booking_classes.yaml"
+        itin = Itinerary(**yaml.safe_load(path.read_text()))
+        scripts = generator._segment_scripts(itin)
+        a_seg = next(s for s in scripts if s.booking_class == "A")
+        assert "if A unavailable: the lower-cabin code (D or I), then Y" in (
+            a_seg.phone_instruction
+        )
 
     def test_fj_atr72_note(self, generator, v3):
-        """FJ ATR-72 segment should have Y-class mapping note."""
+        """FJ ATR-72 (single class) books L, then B — never Y (§5(b))."""
         scripts = generator._segment_scripts(v3)
         # Segment 7: NAN-FUN (ATR-72)
         atr_seg = scripts[7]
         assert atr_seg.carrier == "FJ"
-        assert "ATR" in atr_seg.phone_instruction or "Y" in atr_seg.phone_instruction
+        assert (
+            "single-class aircraft: book L; if L is unavailable, book B; "
+            "no refund for the downgrade" in atr_seg.phone_instruction
+        )
+        assert "D maps to Y. Confirm Y" not in atr_seg.phone_instruction
 
     def test_closing_checklist(self, generator, v3):
         """Closing checklist covers key items."""
@@ -150,6 +201,13 @@ class TestPhoneScript:
         assert "DONE4" in closing  # ticket type
         assert "PNR" in closing
 
+    def test_closing_checklist_requires_osi_yy_ow_rtw(self, generator, v3):
+        """Rule 3015 §5(a): OSI YY OW RTW must be in the PNR or it may cancel."""
+        closing = generator._closing_checklist(v3)
+        assert "OSI YY OW RTW" in closing
+        assert "§5(a)" in closing
+        assert "auto-cancelled" in closing
+
 
 # --- T032: Warnings ---
 
@@ -157,19 +215,22 @@ class TestPhoneScript:
 class TestWarnings:
     """Test same-city, married segment, and mainline IB warnings."""
 
-    def test_same_city_nrt_hnd_warning(self, generator, v3):
+    def test_same_city_nrt_hnd_warning(self, generator, v3_same_city):
         """NRT arrival -> HND departure triggers same-city warning."""
-        scripts = generator._segment_scripts(v3)
+        scripts = generator._segment_scripts(v3_same_city)
         # Segment 3 departs HND, previous arrived NRT
         seg3 = scripts[3]
         same_city_warnings = [w for w in seg3.warnings if "Same-city" in w]
         assert len(same_city_warnings) == 1
         assert "NRT" in same_city_warnings[0]
         assert "HND" in same_city_warnings[0]
+        # §4: the airport change uses one of the 16 segments
+        assert "surface sector" in same_city_warnings[0]
+        assert "16 segments" in same_city_warnings[0]
 
-    def test_same_city_tsa_tpe_warning(self, generator, v3):
+    def test_same_city_tsa_tpe_warning(self, generator, v3_same_city):
         """TSA arrival -> TPE departure triggers same-city warning."""
-        scripts = generator._segment_scripts(v3)
+        scripts = generator._segment_scripts(v3_same_city)
         # Segment 4 departs TPE, previous arrived TSA
         seg4 = scripts[4]
         same_city_warnings = [w for w in seg4.warnings if "Same-city" in w]
@@ -352,8 +413,29 @@ class TestGDSCommands:
             ],
         )
         fxp = next(c for c in generator._gds_commands(itin) if c.startswith("FXP"))
-        # surface = line 1, first flight = line 2
-        assert fxp.startswith("FXP/S2RW/")
+        # name = line 1, surface (ARNK) = line 2, first flight = line 3
+        assert fxp.startswith("FXP/S3RW/")
+
+    def test_fxp_one_passenger_matches_clue_card_s2(self, generator):
+        """1 pax, first segment flown -> S2, as on the Qantas card (FXP/S2RW)."""
+        itin = Itinerary(
+            ticket={"type": "LONE4", "cabin": "economy", "origin": "SYD",
+                    "passengers": 1},
+            segments=[
+                {"from": "SYD", "to": "LHR", "carrier": "QF", "date": "2026-04-01"},
+                {"from": "LHR", "to": "JFK", "carrier": "BA", "date": "2026-04-10"},
+                {"from": "JFK", "to": "SYD", "carrier": "QF", "type": "final",
+                 "date": "2026-04-20"},
+            ],
+        )
+        fxp = next(c for c in generator._gds_commands(itin) if c.startswith("FXP"))
+        assert fxp == "FXP/S2RW/A-LONE4"
+
+    def test_fxp_two_passengers_is_s3(self, generator, v3):
+        """2 pax (V3): two name lines precede the first flown segment -> S3."""
+        assert v3.ticket.passengers == 2
+        fxp = next(c for c in generator._gds_commands(v3) if c.startswith("FXP"))
+        assert fxp == "FXP/S3RW/A-DONE4"
 
     def test_fxp_uses_ticket_fare_basis(self, generator):
         """The forced fare basis is the ticket type verbatim (AONE3, LONE5...)."""
@@ -416,11 +498,31 @@ class TestGenerate:
         result = generator.generate(v3)
         assert len(result.warnings) > 0
 
-    def test_warnings_include_same_city(self, generator, v3):
+    def test_warnings_include_same_city(self, generator, v3_same_city):
         """Aggregated warnings include same-city transitions."""
-        result = generator.generate(v3)
+        result = generator.generate(v3_same_city)
         same_city = [w for w in result.warnings if "Same-city" in w]
-        assert len(same_city) >= 2  # NRT/HND and TSA/TPE
+        assert len(same_city) == 2  # NRT/HND and TSA/TPE
+
+    def test_opening_counts_airport_change_surface(self, generator, v3_same_city):
+        """Opening script totals airport changes as surface sectors (§4)."""
+        opening = generator._opening_script(v3_same_city)
+        assert "15 flown + 1 surface + 2 airport-change surface = 18 total" in opening
+
+    def test_v3_has_no_same_city_warnings(self, generator, v3):
+        result = generator.generate(v3)
+        assert not [w for w in result.warnings if "Same-city" in w]
+        assert "15 flown + 1 surface" in result.opening
+        assert "airport-change" not in result.opening
+
+    def test_osi_warning_points_to_checklist(self, generator, v3):
+        """The GDS note must not claim OSI is in the phone script."""
+        result = generator.generate(v3)
+        gds_note = next(w for w in result.warnings if "first-party-verified" in w)
+        assert "OSI YY OW RTW" in gds_note
+        assert "closing-checklist" in gds_note
+        assert "(SS/ARNK/OSI/FV) are given per-segment" not in gds_note
+        assert "OSI YY OW RTW" in result.closing
 
     def test_warnings_include_married_segment(self, generator, v3):
         """Aggregated warnings include married segment risk."""

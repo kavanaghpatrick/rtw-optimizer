@@ -194,6 +194,8 @@ class RichFormatter:
             f"Total All Pax:   ${estimate.total_all_pax_usd:,.2f}",
             f"Plating Carrier: {estimate.plating_carrier}",
         ]
+        if estimate.fare_source:
+            lines.append(f"Fare Source:     {estimate.fare_source}")
         if estimate.notes:
             lines.append(f"Notes:           {estimate.notes}")
 

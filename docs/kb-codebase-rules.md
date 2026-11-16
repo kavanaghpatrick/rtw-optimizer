@@ -384,9 +384,9 @@ A report passes if no results with `severity=VIOLATION` have `passed=False`. War
 #### EuMeAfricaZoneRule
 - **rule_id**: `eu_me_africa_zone`
 - **Reference**: Rule 3015 SS11
-- **Checks**: If ALL intercontinental flights touching Africa go to/from EU_ME, then South Africa (ZA) and Mauritius (MU) cannot be included.
-- **Pass**: Rule does not apply (Africa has non-EU/ME intercontinental connection), or no ZA/MU airports present
-- **Fail (VIOLATION)**: Both Africa IC flights are EU_ME-only AND itinerary includes ZA or MU airports
+- **Checks**: If ALL intercontinental flights touching Africa go to/from the Europe zone of EU_ME, then South Africa (ZA) and Mauritius (MU) cannot be included. The Middle East zone (`MIDDLE_EAST_COUNTRIES` plus Libya, Sudan, Iran; includes Egypt) does not count as the Europe zone; Algeria, Morocco and Tunisia stay in the Europe zone.
+- **Pass**: Rule does not apply (an Africa intercontinental flight connects to the Middle East zone or another continent), or no ZA/MU airports present
+- **Fail (VIOLATION)**: All Africa IC flights are Europe-zone-only AND itinerary includes ZA or MU airports
 
 ### Module: intercontinental.py (Rule 3015 SS4(e))
 
@@ -460,7 +460,7 @@ A report passes if no results with `severity=VIOLATION` have `passed=False`. War
 | 25 | `origin_matches_first_segment` | validity | SS7 | WARNING | Ticket origin matches first segment departure |
 | 26 | `date_sequence` | validity | SS4 | VIOLATION | Segment dates in chronological order |
 | 27 | `hemisphere_revisit` | hemisphere | SS11 | VIOLATION | Northern continents max 2 visits, southern max 1 |
-| 28 | `eu_me_africa_zone` | hemisphere | SS11 | VIOLATION | ZA/MU excluded when both Africa IC flights are EU_ME |
+| 28 | `eu_me_africa_zone` | hemisphere | SS11 | VIOLATION | ZA/MU excluded when all Africa IC flights are Europe zone |
 | 29 | `intercontinental_limit` | intercontinental | SS4(e) | VIOLATION | Max 1 IC arrival + 1 departure per continent (with exceptions) |
 | 30 | `origin_country_intl_limit` | country | SS4(f) | VIOLATION | Origin country international flight limits |
 | 31 | `origin_country_return` | country | SS6 | VIOLATION | No mid-journey return to origin country |

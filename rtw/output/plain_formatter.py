@@ -123,6 +123,8 @@ class PlainFormatter:
         lines.append(f"  Passengers:      {estimate.passengers}")
         lines.append(f"  Total All Pax:   ${estimate.total_all_pax_usd:,.2f}")
         lines.append(f"  Plating Carrier: {estimate.plating_carrier}")
+        if estimate.fare_source:
+            lines.append(f"  Fare Source:     {estimate.fare_source}")
         if estimate.notes:
             lines.append(f"  Notes:           {estimate.notes}")
         return "\n".join(lines)
