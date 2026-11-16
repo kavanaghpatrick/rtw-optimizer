@@ -38,6 +38,93 @@ def _make_query(**kwargs) -> SearchQuery:
     return SearchQuery(**defaults)
 
 
+class TestContinentCountFilter:
+    def test_done4_route_covering_3_continents_is_dropped(self, hub_table):
+        """LHR + NRT/HKG/JFK covers 3 continents; must not come back as DONE4."""
+        query = _make_query(cities=["NRT", "HKG", "JFK"], origin="LHR")
+        assert generate_candidates(query, hub_table) == []
+
+    def test_done3_route_covering_4_continents_is_dropped(self, hub_table):
+        """SYD + LHR/NRT/JFK covers 4 continents; must not come back as DONE3."""
+        query = _make_query(
+            cities=["LHR", "NRT", "JFK"], origin="SYD", ticket_type=TicketType.DONE3
+        )
+        assert generate_candidates(query, hub_table) == []
+
+    def test_candidates_cover_exactly_ticket_continents(self, hub_table):
+        from rtw.validator import build_context
+
+        query = _make_query(cities=["LHR", "NRT", "JFK"], origin="SYD")
+        candidates = generate_candidates(query, hub_table)
+        assert candidates
+        for c in candidates:
+            ctx = build_context(c.itinerary)
+            assert len(ctx.continents_visited) == 4, (
+                f"{c.route_segments}: {ctx.continents_visited}"
+            )
+
+
+def _route_airports(candidate) -> list[str]:
+    segs = candidate.itinerary.segments
+    return [s.from_airport for s in segs] + [segs[-1].to_airport]
+
+
+class TestOriginTariffConferenceCities:
+    """Must-visit cities in the origin's own tariff conference must be routed."""
+
+    def test_origin_continent_city_is_placed(self, hub_table):
+        """MAD (same continent as LHR) used to be silently dropped."""
+        query = _make_query(
+            cities=["NRT", "JFK", "MAD"], origin="LHR", ticket_type=TicketType.DONE3
+        )
+        candidates = generate_candidates(query, hub_table)
+        assert candidates
+        for c in candidates:
+            route = _route_airports(c)
+            assert "MAD" in route, route
+            # MAD sits right after leaving or right before returning to LHR.
+            assert route[1] == "MAD" or route[-2] == "MAD", route
+
+    def test_other_continent_in_origin_tc_is_placed(self, hub_table):
+        """NBO (Africa, TC2) for a London origin forms its own continent slot."""
+        query = _make_query(cities=["NRT", "JFK", "NBO"], origin="LHR")
+        candidates = generate_candidates(query, hub_table)
+        assert candidates
+        routes = {"-".join(_route_airports(c)) for c in candidates}
+        assert "LHR-NBO-DOH-HKG-NRT-LAX-JFK-LHR" in routes
+        assert "LHR-JFK-LAX-NRT-HKG-DOH-NBO-LHR" in routes
+        for c in candidates:
+            assert "NBO" in _route_airports(c)
+
+    def test_unroutable_origin_tc_city_returns_nothing(self, hub_table):
+        """JNB via Europe/ME both ways breaks the South Africa exclusion.
+
+        The hub table only links Africa through Europe/ME, so no route is
+        possible. Previously the search returned JNB-less routes that still
+        claimed JNB as visited.
+        """
+        query = _make_query(cities=["NRT", "JFK", "JNB"], origin="LHR")
+        for c in generate_candidates(query, hub_table):
+            assert "JNB" in _route_airports(c)
+
+    @pytest.mark.parametrize(
+        "origin,cities,ticket",
+        [
+            ("LHR", ["NRT", "JFK", "MAD"], TicketType.DONE3),
+            ("LHR", ["NRT", "JFK", "NBO"], TicketType.DONE4),
+            ("LHR", ["NRT", "JFK", "JNB"], TicketType.DONE4),
+            ("JFK", ["LIM", "SCL", "NRT", "DOH"], TicketType.DONE4),
+            ("CAI", ["LHR", "NRT", "SYD", "JFK"], TicketType.DONE4),
+        ],
+    )
+    def test_every_must_visit_city_on_route(self, hub_table, origin, cities, ticket):
+        query = _make_query(cities=cities, origin=origin, ticket_type=ticket)
+        for c in generate_candidates(query, hub_table):
+            route = set(_route_airports(c))
+            missing = set(cities) - route
+            assert not missing, f"{_route_airports(c)} missing {missing}"
+
+
 class TestCoreGeneration:
     def test_4_continent_produces_candidates(self, hub_table):
         query = _make_query()
@@ -52,9 +139,11 @@ class TestCoreGeneration:
         assert len(directions) >= 1
 
     def test_3_city_done3_produces_candidates(self, hub_table):
+        # LHR origin + NRT/HKG/JFK = EU_ME, Asia, N_America = 3 continents.
+        # (SYD origin + LHR/NRT/JFK is 4 continents and cannot be DONE3.)
         query = _make_query(
-            cities=["LHR", "NRT", "JFK"],
-            origin="SYD",
+            cities=["NRT", "HKG", "JFK"],
+            origin="LHR",
             ticket_type=TicketType.DONE3,
         )
         candidates = generate_candidates(query, hub_table)

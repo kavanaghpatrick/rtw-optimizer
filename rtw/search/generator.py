@@ -71,26 +71,74 @@ def _group_cities_by_tc(
     return groups
 
 
+# Where must-visit cities in the origin's tariff conference go: at the start
+# of the journey (right after leaving origin) or at the end (just before
+# returning). Index 0 = cities on the origin's own continent (e.g. MAD for
+# LHR), index 1 = cities on the other continent in that conference (e.g. JNB
+# for LHR, LIM for JFK).
+_HEAD = "head"
+_TAIL = "tail"
+_ORIGIN_TC_LAYOUTS: list[tuple[str, str]] = [
+    (own, other) for own in (_HEAD, _TAIL) for other in (_HEAD, _TAIL)
+]
+
+
+def _split_origin_tc_cities(
+    origin: str,
+    cities: tuple[str, ...],
+    layout: tuple[str, str],
+) -> tuple[list[str], list[str]]:
+    """Split origin-TC must-visit cities into (head, tail) legs by continent.
+
+    Cities on the origin's own continent and cities on the other continent of
+    the same tariff conference form separate slots, each placed at the head or
+    tail of the journey per ``layout``. When both share the head, the origin
+    continent comes first; when both share the tail, it comes last, so the
+    trip leaves and re-enters the origin continent only once.
+    """
+    origin_cont = get_continent(origin)
+    own = [c for c in cities if get_continent(c) == origin_cont]
+    other = [c for c in cities if get_continent(c) != origin_cont]
+    own_pos, other_pos = layout
+    head = (own if own_pos == _HEAD else []) + (other if other_pos == _HEAD else [])
+    tail = (other if other_pos == _TAIL else []) + (own if own_pos == _TAIL else [])
+    return head, tail
+
+
 def _build_route(
     origin: str,
     tc_order: list[TariffConference],
     city_groups: dict[TariffConference, list[str]],
     city_permutation: dict[TariffConference, tuple[str, ...]],
     hub_table: HubTable,
+    origin_tc_layout: tuple[str, str] = (_HEAD, _HEAD),
 ) -> Optional[tuple[list[str], int]]:
     """Build a connected route from origin through TC order.
+
+    Must-visit cities in the origin's own tariff conference are placed as a
+    head leg (after leaving origin) and/or tail leg (before returning), split
+    by continent according to ``origin_tc_layout``.
 
     Returns (airport_sequence, hub_count) or None if no valid connection exists.
     """
     route = [origin]
     hub_count = 0
 
-    # Build the middle portion: visit TCs in order
-    # tc_order is like [TC2, TC3, TC1, TC2] — skip first (origin TC) and last (return TC)
-    middle_tcs = tc_order[1:-1]
+    origin_tc = tc_order[0]
+    head, tail = _split_origin_tc_cities(
+        origin, tuple(city_permutation.get(origin_tc, ())), origin_tc_layout
+    )
 
-    for tc in middle_tcs:
-        cities_in_tc = list(city_permutation.get(tc, ()))
+    # Travel order: head leg (origin TC), middle TCs, tail leg (origin TC).
+    # tc_order is like [TC2, TC3, TC1, TC2] — the middle TCs skip first/last.
+    legs: list[tuple[TariffConference, list[str]]] = [(origin_tc, head)]
+    legs += [(tc, list(city_permutation.get(tc, ()))) for tc in tc_order[1:-1]]
+    legs.append((origin_tc, tail))
+
+    for leg_index, (tc, cities_in_tc) in enumerate(legs):
+        is_origin_leg = leg_index in (0, len(legs) - 1)
+        if not cities_in_tc and is_origin_leg:
+            continue
         if not cities_in_tc:
             # No must-visit cities in this TC — pick a hub to transit through
             prev_airport = route[-1]
@@ -175,8 +223,11 @@ def _route_to_itinerary(
             else:
                 carrier = "AA"
 
-        seg_type = SegmentType.STOPOVER
-        # Last segment is stopover (returning to origin)
+        # The last segment returns to origin: that arrival ends the journey and
+        # is not a stopover, so it must not count toward the Rule 3015 §6
+        # origin-continent stopover limit.
+        is_last = i == len(route) - 2
+        seg_type = SegmentType.FINAL if is_last else SegmentType.STOPOVER
         segments.append(
             Segment(
                 **{
@@ -240,6 +291,7 @@ def generate_candidates(
     for tc_key in city_groups:
         city_groups[tc_key] = [c for c in city_groups[tc_key] if c != query.origin]
 
+    must_visit = set(query.cities) - {query.origin}
     candidates: list[CandidateItinerary] = []
     seen_routes: set[str] = set()
 
@@ -273,64 +325,84 @@ def generate_candidates(
                 TariffConference.TC3: perm_combo[2],
             }
 
-            result = _build_route(query.origin, tc_order, city_groups, perm_map, hub_table)
-            if result is None:
-                continue
-
-            route, hub_count = result
-
-            # Dedup
-            key = _route_key(route)
-            if key in seen_routes:
-                continue
-            seen_routes.add(key)
-
-            # Build itinerary and validate
-            try:
-                itinerary = _route_to_itinerary(route, query, hub_table)
-            except Exception:
-                logger.debug("Failed to build itinerary for route %s", route)
-                continue
-
-            report = validator.validate(itinerary)
-            if not report.passed:
-                continue
-
-            # Nonstop filter: eliminate candidates with non-nonstop segments
-            if nonstop_filter is not None:
-                filtered_out = False
-                for seg in itinerary.segments:
-                    if seg.type == SegmentType.SURFACE:
-                        continue
-                    try:
-                        if not nonstop_filter(seg.from_airport, seg.to_airport, seg.carrier or ""):
-                            filtered_out = True
-                            break
-                    except Exception:
-                        pass  # Treat errors as "unknown" — keep segment
-                if filtered_out:
+            for layout in _ORIGIN_TC_LAYOUTS:
+                if direction_count >= _MAX_CANDIDATES_PER_DIRECTION:
+                    break
+                result = _build_route(
+                    query.origin, tc_order, city_groups, perm_map, hub_table, layout
+                )
+                if result is None:
                     continue
 
-            # Build route segments for display
-            route_segments = [
-                RouteSegment(
-                    from_airport=seg.from_airport,
-                    to_airport=seg.to_airport,
-                    carrier=seg.carrier or "AA",
-                    segment_type=seg.type,
-                )
-                for seg in itinerary.segments
-            ]
+                route, hub_count = result
 
-            candidates.append(
-                CandidateItinerary(
-                    itinerary=itinerary,
-                    direction=direction,
-                    route_segments=route_segments,
-                    hub_count=hub_count,
-                    must_visit_cities=list(query.cities),
+                # Every must-visit city must actually be on the route.
+                if not must_visit <= set(route):
+                    continue
+
+                # Dedup
+                key = _route_key(route)
+                if key in seen_routes:
+                    continue
+                seen_routes.add(key)
+
+                # Build itinerary and validate
+                try:
+                    itinerary = _route_to_itinerary(route, query, hub_table)
+                except Exception:
+                    logger.debug("Failed to build itinerary for route %s", route)
+                    continue
+
+                report = validator.validate(itinerary)
+                if not report.passed:
+                    continue
+
+                # Ticket type must match continents actually visited (priced per
+                # continent, Rule 3015 §16). Fewer continents = mislabelled/overpaid.
+                # Under-visiting is only a WARNING, so check the rule explicitly:
+                # every candidate is promised to be issuable as labelled.
+                if not all(
+                    r.passed for r in report.results if r.rule_id == "continent_count"
+                ):
+                    continue
+
+                # Nonstop filter: eliminate candidates with non-nonstop segments
+                if nonstop_filter is not None:
+                    filtered_out = False
+                    for seg in itinerary.segments:
+                        if seg.type == SegmentType.SURFACE:
+                            continue
+                        try:
+                            if not nonstop_filter(
+                                seg.from_airport, seg.to_airport, seg.carrier or ""
+                            ):
+                                filtered_out = True
+                                break
+                        except Exception:
+                            pass  # Treat errors as "unknown" — keep segment
+                    if filtered_out:
+                        continue
+
+                # Build route segments for display
+                route_segments = [
+                    RouteSegment(
+                        from_airport=seg.from_airport,
+                        to_airport=seg.to_airport,
+                        carrier=seg.carrier or "AA",
+                        segment_type=seg.type,
+                    )
+                    for seg in itinerary.segments
+                ]
+
+                candidates.append(
+                    CandidateItinerary(
+                        itinerary=itinerary,
+                        direction=direction,
+                        route_segments=route_segments,
+                        hub_count=hub_count,
+                        must_visit_cities=list(query.cities),
+                    )
                 )
-            )
-            direction_count += 1
+                direction_count += 1
 
     return candidates

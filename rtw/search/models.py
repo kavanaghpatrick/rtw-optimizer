@@ -107,7 +107,13 @@ class CandidateItinerary(BaseModel):
 
     @property
     def segment_count(self) -> int:
-        return len(self.itinerary.segments)
+        """Segments counted toward the 16 limit: listed segments plus implicit
+        same-city airport-change surface sectors (Rule 3015 §4)."""
+        from rtw.validator import find_same_city_gaps
+
+        return len(self.itinerary.segments) + len(
+            find_same_city_gaps(self.itinerary.segments)
+        )
 
 
 class ScoredCandidate(BaseModel):

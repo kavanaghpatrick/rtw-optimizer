@@ -180,3 +180,41 @@ class TestCompositeAndRanking:
         ranked = rank_candidates(scored)
         ranks = [c.rank for c in ranked]
         assert ranks == [1, 2, 3]
+
+
+class TestImplicitSurfaceSegmentCount:
+    """Same-city airport changes count as segments in search (Rule 3015 §4)."""
+
+    @staticmethod
+    def _candidate(airport_pairs) -> CandidateItinerary:
+        segs = [
+            Segment(**{"from": a, "to": b, "carrier": "AA", "type": "stopover"})
+            for a, b in airport_pairs
+        ]
+        itin = Itinerary(
+            ticket=Ticket(type=TicketType.DONE4, cabin=CabinClass.BUSINESS, origin="CAI"),
+            segments=segs,
+        )
+        return CandidateItinerary(itinerary=itin, direction=Direction.EASTBOUND)
+
+    def test_segment_count_includes_airport_changes(self):
+        # 13 listed + NRT->HND gap = 14 segments
+        pairs = [("CAI", "DOH"), ("DOH", "NRT"), ("HND", "SIN")] + [("SIN", "SIN")] * 9 + [
+            ("SIN", "CAI")
+        ]
+        cand = self._candidate(pairs)
+        assert len(cand.itinerary.segments) == 13
+        assert cand.segment_count == 14
+
+    def test_quality_penalises_airport_change(self):
+        gap = self._candidate(
+            [("CAI", "DOH"), ("DOH", "NRT"), ("HND", "SIN")] + [("SIN", "SIN")] * 9 + [("SIN", "CAI")]
+        )
+        same = self._candidate(
+            [("CAI", "DOH"), ("DOH", "NRT"), ("NRT", "SIN")] + [("SIN", "SIN")] * 9 + [("SIN", "CAI")]
+        )
+        assert same.segment_count == 13
+        s_gap = route_quality_score(ScoredCandidate(candidate=gap))
+        s_same = route_quality_score(ScoredCandidate(candidate=same))
+        # 14 vs 13 segments beyond 12: one extra -5 penalty
+        assert s_same - s_gap == 5

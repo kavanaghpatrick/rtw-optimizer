@@ -63,7 +63,8 @@ def route_quality_score(candidate: ScoredCandidate) -> float:
     score -= candidate.candidate.hub_count * 8
 
     # Segment penalty (beyond 12)
-    seg_count = len(candidate.candidate.itinerary.segments)
+    # Includes implicit same-city airport-change surface sectors (§4)
+    seg_count = candidate.candidate.segment_count
     if seg_count > 12:
         score -= (seg_count - 12) * 5
 

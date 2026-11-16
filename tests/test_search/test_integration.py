@@ -38,7 +38,7 @@ class TestParseToGenerate:
             date_from=FUTURE,
             date_to=FUTURE_END,
             cabin="business",
-            ticket_type="DONE3",
+            ticket_type="DONE4",  # SYD+LHR/NRT/JFK = 4 continents
         )
         candidates = generate_candidates(query)
         assert len(candidates) > 0
@@ -66,7 +66,7 @@ class TestParseToGenerate:
             date_from=FUTURE,
             date_to=FUTURE_END,
             cabin="business",
-            ticket_type="DONE3",
+            ticket_type="DONE4",  # SYD+LHR/NRT/JFK = 4 continents
         )
         candidates = generate_candidates(query)
         for c in candidates:
@@ -85,7 +85,7 @@ class TestGenerateToScore:
             date_from=FUTURE,
             date_to=FUTURE_END,
             cabin="business",
-            ticket_type="DONE3",
+            ticket_type="DONE4",  # SYD+LHR/NRT/JFK = 4 continents
         )
         candidates = generate_candidates(query)
         scored = [ScoredCandidate(candidate=c) for c in candidates]
@@ -105,7 +105,7 @@ class TestGenerateToScore:
             date_from=FUTURE,
             date_to=FUTURE_END,
             cabin="business",
-            ticket_type="DONE3",
+            ticket_type="DONE4",  # SYD+LHR/NRT/JFK = 4 continents
         )
         candidates = generate_candidates(query)
         scored = [ScoredCandidate(candidate=c) for c in candidates[:5]]
@@ -126,7 +126,7 @@ class TestScoreToDisplay:
             date_from=FUTURE,
             date_to=FUTURE_END,
             cabin="business",
-            ticket_type="DONE3",
+            ticket_type="DONE4",  # SYD+LHR/NRT/JFK = 4 continents
         )
         candidates = generate_candidates(query)
         scored = [ScoredCandidate(candidate=c) for c in candidates[:3]]
@@ -153,7 +153,7 @@ class TestScoreToDisplay:
             date_from=FUTURE,
             date_to=FUTURE_END,
             cabin="business",
-            ticket_type="DONE3",
+            ticket_type="DONE4",  # SYD+LHR/NRT/JFK = 4 continents
         )
         candidates = generate_candidates(query)
         scored = [ScoredCandidate(candidate=c) for c in candidates[:3]]
@@ -182,7 +182,7 @@ class TestScoreToExport:
             date_from=FUTURE,
             date_to=FUTURE_END,
             cabin="business",
-            ticket_type="DONE3",
+            ticket_type="DONE4",  # SYD+LHR/NRT/JFK = 4 continents
         )
         candidates = generate_candidates(query)
         scored = [ScoredCandidate(candidate=c) for c in candidates[:1]]
