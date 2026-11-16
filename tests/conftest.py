@@ -7,6 +7,13 @@ from pathlib import Path
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def _no_live_serpapi(monkeypatch):
+    # The suite must never spend real SerpAPI credits or stall on the
+    # live service; tests that need the key set it explicitly.
+    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
+
+
 @pytest.fixture
 def load_yaml():
     """Return a function that loads a YAML fixture file."""

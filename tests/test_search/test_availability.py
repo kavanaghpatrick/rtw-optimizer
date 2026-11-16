@@ -59,6 +59,15 @@ def _make_candidate(num_segs=5, surface_indices=None) -> ScoredCandidate:
     return ScoredCandidate(candidate=cand)
 
 
+@pytest.fixture(autouse=True)
+def _no_live_playwright():
+    # The AUTO cascade falls through to a live Playwright scrape of Google
+    # Flights when earlier backends return None or raise; stub it so these
+    # unit tests never open a real browser session.
+    with patch("rtw.scraper.google_flights.search_playwright_sync", return_value=None):
+        yield
+
+
 @pytest.fixture
 def tmp_cache(tmp_path):
     return ScrapeCache(cache_dir=tmp_path, default_ttl_hours=1)
