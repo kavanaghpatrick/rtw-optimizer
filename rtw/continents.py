@@ -18,12 +18,24 @@ with open(_DATA_DIR / "continents.yaml") as f:
 _OVERRIDES: dict[str, str] = _CONTINENT_DATA.get("overrides", {})
 _COUNTRIES: dict[str, list[str]] = _CONTINENT_DATA.get("countries", {})
 _SEGMENT_LIMITS: dict[str, int] = _CONTINENT_DATA.get("segment_limits", {})
+# Russia is split at the Urals (01-fare-rules.md §3) and resolved by longitude.
+_RUSSIA_URALS_LON: float = float(_CONTINENT_DATA["russia_urals_longitude"])
 
 # Build reverse country lookup: country_code -> continent_name
 _COUNTRY_TO_CONTINENT: dict[str, str] = {}
 for continent_name, country_codes in _COUNTRIES.items():
     for cc in country_codes:
+        # Catch YAML 1.1 surprises (bare NO -> False) and duplicate listings.
+        if not (isinstance(cc, str) and len(cc) == 2):
+            raise ValueError(f"continents.yaml: bad country code {cc!r} under {continent_name}")
+        if cc in _COUNTRY_TO_CONTINENT:
+            raise ValueError(
+                f"continents.yaml: {cc} listed under both "
+                f"{_COUNTRY_TO_CONTINENT[cc]} and {continent_name}"
+            )
         _COUNTRY_TO_CONTINENT[cc] = continent_name
+if "RU" in _COUNTRY_TO_CONTINENT:
+    raise ValueError("continents.yaml: RU must not be in countries; it is split at the Urals")
 
 # Load same-city groups
 with open(_DATA_DIR / "same_cities.yaml") as f:
@@ -41,8 +53,10 @@ def get_continent(airport_code: str) -> Optional[Continent]:
 
     Resolution order:
     1. Explicit overrides (CAI -> EU_ME, GUM -> Asia, etc.)
-    2. Country lookup via airportsdata
-    3. None if unknown
+    2. Russia: Asia east of the Urals, Europe/Middle East west of them
+       (01-fare-rules.md §3), decided by the airport's longitude
+    3. Country lookup via airportsdata
+    4. None if unknown
     """
     code = airport_code.upper()
 
@@ -52,7 +66,12 @@ def get_continent(airport_code: str) -> Optional[Continent]:
 
     # Try airportsdata country lookup
     if code in _airports_db:
-        country = _airports_db[code].get("country", "")
+        info = _airports_db[code]
+        country = info.get("country", "")
+        if country == "RU":
+            if float(info["lon"]) > _RUSSIA_URALS_LON:
+                return Continent.ASIA
+            return Continent.EU_ME
         # airportsdata uses ISO 2-letter country codes
         if country in _COUNTRY_TO_CONTINENT:
             return Continent(_COUNTRY_TO_CONTINENT[country])
@@ -171,16 +190,16 @@ def get_country_name(country_code: str) -> str:
 # Regional country sets
 # ---------------------------------------------------------------------------
 
-MIDDLE_EAST_COUNTRIES: frozenset[str] = frozenset({
-    "BH", "EG", "IQ", "IL", "JO", "KW", "LB", "OM", "PS", "QA", "SA",
-    "SY", "AE", "YE",
-})
+# Both sets come from continents.yaml so they cannot drift from get_continent().
+MIDDLE_EAST_COUNTRIES: frozenset[str] = frozenset(_CONTINENT_DATA["middle_east"])
 
-AFRICA_COUNTRIES: frozenset[str] = frozenset({
-    "ZA", "KE", "ET", "NG", "TZ", "GH", "SN", "CI", "CM", "UG",
-    "MZ", "ZW", "BW", "NA", "MU", "MW", "ZM", "RW", "AO", "CD",
-    "CG", "GA", "MG", "SC", "RE",
-})
+AFRICA_COUNTRIES: frozenset[str] = frozenset(_COUNTRIES["Africa"])
+
+_ME_NOT_EU_ME = MIDDLE_EAST_COUNTRIES - set(_COUNTRIES["EU_ME"])
+if _ME_NOT_EU_ME:
+    raise ValueError(
+        f"continents.yaml: middle_east codes not under EU_ME: {sorted(_ME_NOT_EU_ME)}"
+    )
 
 
 # ---------------------------------------------------------------------------

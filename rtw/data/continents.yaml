@@ -8,7 +8,15 @@ overrides:
   HRG: EU_ME       # Hurghada, Egypt
   SSH: EU_ME       # Sharm El Sheikh, Egypt
   LXR: EU_ME       # Luxor, Egypt
+  ALA: Asia        # Almaty, Kazakhstan = Asia (TC3). oneworld Explorer rules: "The continent of Asia includes Kazakhstan, Kyrgyzstan, Russia east of the Urals, Tajikistan, Turkmenistan and Uzbekistan" (oneworld FAQ PDF); IATA also puts KZ in TC3 South East Asia
+  NQZ: Asia        # Astana, Kazakhstan = Asia (TC3), same basis as ALA
   GUM: Asia        # Guam = Asia (TC3 SE Asia), NOT North America despite US territory
+  # Russia boundary airports (see russia_urals_longitude). IATA country code RU
+  # covers Russia "west from and including the Ural Mountains", so cities in the
+  # Urals themselves stay Europe even though they sit just east of 60E.
+  SVX: EU_ME       # Yekaterinburg (60.8E), Middle Urals
+  CEK: EU_ME       # Chelyabinsk (61.5E), eastern Urals foothills
+  VKT: EU_ME       # Vorkuta (64.0E), Komi Republic, west of the Polar Urals ridge
   MEX: N_America   # Mexico = North America
   CUN: N_America   # Cancun, Mexico
   GDL: N_America   # Guadalajara, Mexico
@@ -44,150 +52,320 @@ overrides:
   VLI: SWP         # Port Vila, Vanuatu
   TBU: SWP         # Tongatapu, Tonga
 
-# Country-to-continent defaults
+# Country-to-continent defaults.
+#
+# Sources, in priority order:
+#   1. 01-fare-rules.md §3 (oneworld Explorer continent definitions). Where it
+#      names a country explicitly it wins, even against IATA (e.g. Libya is in
+#      IATA "Within Africa" but oneworld puts it in Europe/Middle East; Panama is
+#      IATA "South America" but oneworld puts it in North America).
+#   2. IATA "Provisions for the Conduct of the IATA Traffic Conferences", First
+#      Schedule (sub-area country lists), for countries the rule text covers
+#      only by region ("All of Europe", "Middle East", "Caribbean",
+#      "SE Asia", "Pacific Islands").
+#
+# Russia (RU) is deliberately NOT listed: it is split at the Urals and resolved
+# by airport longitude in rtw/continents.py (see russia_urals_longitude below).
+#
+# Deliberately unmapped (rule text silent and IATA sub-area does not settle the
+# oneworld continent): AQ, EH, FK, GL, SH, SS, TL, UM. Airports there resolve to
+# None and the validator reports "Unknown continent" instead of guessing.
 countries:
   # TC2 - Europe/Middle East
   EU_ME:
-    - GB
-    - FR
-    - DE
-    - ES
-    - IT
-    - NL
-    - PT
-    - CH
-    - AT
-    - BE
-    - IE
-    - SE
-    - "NO"  # YAML parses bare NO as boolean False — must quote
-    - DK
-    - FI
-    - GR
-    - TR
-    - PL
-    - CZ
-    - HU
-    - RO
-    - BG
-    - HR
-    - RS
-    - IL
-    - JO
-    - QA
-    - AE
-    - SA
-    - BH
-    - KW
-    - OM
-    - EG
-    - MA
-    - TN
-    - DZ
-    - LY
-    - SD
-    - YE
-    - RU  # West of Urals
+    # IATA "Within Europe" sub-area (01-fare-rules.md §3: "All of Europe")
+    - AD
+    - AL
     - AM
+    - AT
+    - AX  # Aland Islands (Finland)
     - AZ
+    - BA
+    - BE
+    - BG
+    - BY
+    - CH
+    - CY
+    - CZ
+    - DE
+    - DK
+    - DZ
+    - EE
+    - ES
+    - FI
+    - FO  # Faroe Islands (Denmark)
+    - FR
+    - GB
     - GE
+    - GG  # Guernsey
+    - GI
+    - GR
+    - HR
+    - HU
+    - IE
+    - IM  # Isle of Man
+    - IS
+    - IT
+    - JE  # Jersey
+    - LI
+    - LT
+    - LU
+    - LV
+    - MA
+    - MC
     - MD
+    - ME
+    - MK
+    - MT
+    - NL
+    - "NO"  # YAML parses bare NO as boolean False — must quote
+    - PL
+    - PT
+    - RO
+    - RS
+    - SE
+    - SI
+    - SK
+    - SM
+    - TN
+    - TR
+    - UA
+    - XK  # Kosovo
+    # IATA "Within Middle East" sub-area (01-fare-rules.md §3: "Middle East",
+    # Egypt, Sudan, Yemen). South Sudan (SS) is in IATA Middle East but is
+    # sub-Saharan; the rule text does not settle it, so it is left unmapped.
+    - AE
+    - BH
+    - EG
+    - IL
+    - IQ
+    - IR
+    - JO
+    - KW
+    - LB
+    - OM
+    - PS
+    - QA
+    - SA
+    - SD
+    - SY
+    - YE
+    # Named explicitly in 01-fare-rules.md §3 (IATA has Libya in Africa)
+    - LY
 
-  # TC2 - Africa (Sub-Saharan)
+  # TC2 - Africa (Sub-Saharan). IATA "Within Africa" sub-area minus Libya,
+  # which 01-fare-rules.md §3 puts in Europe/Middle East.
   Africa:
-    - ZA
-    - KE
-    - ET
-    - NG
-    - GH
-    - TZ
-    - UG
-    - RW
-    - MU
-    - SC
-    - SN
+    - AO
+    - BF
+    - BI
+    - BJ
+    - BW
+    - CD
+    - CF
+    - CG
     - CI
     - CM
-    - MZ
-    - ZW
-    - BW
-    - NA
+    - CV
+    - DJ
+    - ER
+    - ET
+    - GA
+    - GH
+    - GM
+    - GN
+    - GQ
+    - GW
+    - KE
+    - KM
+    - LR
+    - LS
+    - MG
+    - ML
+    - MR
+    - MU
     - MW
+    - MZ
+    - NA
+    - NE
+    - NG
+    - RE  # Reunion
+    - RW
+    - SC
+    - SL
+    - SN
+    - SO
+    - ST
+    - SZ
+    - TD
+    - TG
+    - TZ
+    - UG
+    - YT  # Mayotte
+    - ZA
     - ZM
+    - ZW
 
-  # TC3 - Asia
+  # TC3 - Asia (IATA South Asian Subcontinent, South East Asia and
+  # Japan/Korea sub-areas). Russia east of the Urals is handled in code.
   Asia:
+    # Japan/Korea
     - JP
-    - CN
-    - HK
-    - TW
     - KR
-    - SG
-    - MY
-    - TH
-    - VN
-    - PH
-    - ID
+    - KP
+    # South Asian Subcontinent
+    - AF
+    - BD
+    - BT
     - IN
     - LK
-    - PK
-    - BD
+    - MV
     - NP
-    - MM
+    - PK
+    # South East Asia
+    - BN
+    - CC  # Cocos (Keeling) Islands
+    - CN
+    - CX  # Christmas Island
+    - HK
+    - ID
     - KH
     - LA
-    - MV
+    - MM
+    - MN
+    - MO  # Macau
+    - MY
+    - PH
+    - SG
+    - TH
+    - TW
+    - VN
+    # Central Asia: oneworld Explorer puts these in the continent of Asia (TC3),
+    # per oneworld fare-rule summary and IATA TC3 South East Asia sub-area
+    - KZ
+    - KG
+    - TJ
+    - TM
+    - UZ
+    # North Pacific islands. 01-fare-rules.md §19 puts Guam in the TC3 South
+    # East Asia sub-area; the IATA First Schedule lists Guam, Marshall Islands,
+    # Micronesia, Northern Mariana Islands and Palau together in that sub-area.
+    - GU  # Guam
+    - FM  # Micronesia (PNI, TKK, KSA, YAP)
+    - MH  # Marshall Islands (MAJ, KWA)
+    - MP  # Northern Mariana Islands (SPN)
+    - PW  # Palau (ROR)
 
-  # TC3 - South West Pacific
+  # TC3 - South West Pacific (IATA "South West Pacific" sub-area)
   SWP:
+    - AS  # American Samoa (PPG)
     - AU
-    - NZ
+    - CK  # Cook Islands (RAR)
     - FJ
+    - KI
+    - NC
+    - NF  # Norfolk Island
+    - NR  # Nauru
+    - NU  # Niue
+    - NZ
+    - PF
     - PG
-    - WS
+    - SB
     - TO
     - TV
     - VU
-    - NC
-    - SB
-    - KI
-    - PF
+    - WF  # Wallis and Futuna
+    - WS
 
-  # TC1 - North America
+  # TC1 - North America (01-fare-rules.md §3: USA, Canada, Mexico, Caribbean,
+  # Bermuda, Central America, Panama, Hawaii). Caribbean list is the IATA
+  # "Caribbean Islands" definition plus the Bahamas and St Barthelemy.
   N_America:
     - US
     - CA
     - MX
-    - PA
+    - PM  # Saint Pierre and Miquelon (IATA groups it with USA/Canada)
+    - BM  # Bermuda
+    # Central America + Panama
+    - BZ
     - CR
     - GT
     - HN
-    - SV
     - NI
-    - BZ
-    - JM
-    - CU
-    - DO
-    - HT
-    - TT
+    - PA
+    - SV
+    # Caribbean
+    - AG
+    - AI
+    - AW
     - BB
+    - BL  # St Barthelemy
+    - BQ  # Bonaire, Sint Eustatius, Saba
     - BS
-    - BM
+    - CU
+    - CW
+    - DM
+    - DO
+    - GD
+    - GP
+    - HT
+    - JM
+    - KN
+    - KY
+    - LC
+    - MF  # St Martin (French side)
+    - MQ
+    - MS
+    - PR  # Puerto Rico (airportsdata files it under US; listed for safety)
+    - SX
+    - TC
+    - TT
+    - VC
+    - VG
+    - VI  # US Virgin Islands (airportsdata files it under US; listed for safety)
 
-  # TC1 - South America
+  # TC1 - South America ("All of South America south of Panama")
   S_America:
-    - BR
     - AR
+    - BO
+    - BR
     - CL
     - CO
-    - PE
     - EC
-    - VE
-    - BO
-    - PY
-    - UY
+    - GF  # French Guiana
     - GY
+    - PE
+    - PY
     - SR
+    - UY
+    - VE
+
+# Russia straddles Europe/Middle East and Asia. 01-fare-rules.md §3: Europe/
+# Middle East includes "Russia west of Urals", Asia includes "Russia east of
+# Urals". IATA codes this as RU ("west from and including the Ural Mountains")
+# and XU ("east of, not including, the Urals"). Russian airports east of this
+# longitude resolve to Asia, the rest to EU_ME. Airports in the mountains
+# themselves, or where the Polar Urals bend east, are pinned in `overrides`.
+russia_urals_longitude: 60.0
+
+# Sub-area lists used by the open-jaw check (Rule 3015 §18 "Within the Middle
+# East" / "Within Africa"). Africa reuses countries.Africa. Every code here must
+# also appear under countries.EU_ME (checked at import).
+middle_east:
+  - AE
+  - BH
+  - EG
+  - IL
+  - IQ
+  - JO
+  - KW
+  - LB
+  - OM
+  - PS
+  - QA
+  - SA
+  - SY
+  - YE
 
 # Tariff conference assignments
 tariff_conferences:
